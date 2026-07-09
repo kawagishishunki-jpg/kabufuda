@@ -1,0 +1,3058 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>株ポーカー - 和風カード対戦ゲーム</title>
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="株札とポーカーを融合させた、心理戦と爆発力を楽しむ和風カードゲーム。オンライン対戦・CPU対戦対応。">
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- PeerJS (P2P通信用) -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js" crossorigin="anonymous"></script>
+  <!-- canvas-confetti (勝利時エフェクト用) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <!-- 紙吹雪用キャンバス -->
+  <canvas id="effect-canvas"></canvas>
+
+  <div class="app-container">
+    <header>
+      <h1 class="logo-title gold-text-glow">株ポーカー</h1>
+      <div class="subtitle">心理戦 × 株札 × ポーカー</div>
+      <button id="rules-toggle-btn" class="rules-toggle-btn" title="ルールを見る">📖 役・ルール</button>
+    </header>
+
+    <!-- デバッグログ表示エリア（動作不良の原因特定用） -->
+    <div id="debug-log" style="display: none;">
+      [動作ログ] 起動しています...
+    </div>
+
+    <!-- ロビー画面 -->
+    <div id="lobby-screen" class="lobby-container">
+      <!-- モード選択と設定 -->
+      <div class="wafu-card">
+        <h2>対戦モードを選択</h2>
+        <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
+          <input type="text" id="player-name-input" class="input-wafu" placeholder="対戦者名を入力（例：源氏）" value="プレイヤー">
+          
+          <button id="btn-cpu-mode" class="btn-wafu">🤖 CPU対戦（練習）</button>
+          <button id="btn-create-room" class="btn-wafu btn-wafu-gold">🏯 オンライン対戦（部屋を作る）</button>
+        </div>
+      </div>
+
+      <!-- 部屋に参加する -->
+      <div class="wafu-card">
+        <h2>部屋に入る</h2>
+        <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
+          <p style="font-size: 0.9rem; color: var(--color-muted); line-height: 1.6;">
+            友達が作成した部屋の「合言葉（ルームコード）」を入力して接続します。
+          </p>
+          <input type="text" id="join-room-input" class="input-wafu" placeholder="合言葉（例: kabu-1234）">
+          <button id="btn-join-room" class="btn-wafu btn-wafu-secondary">🚪 部屋に入る</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 待機室（オンライン対戦用） -->
+    <div id="waiting-screen" class="wafu-card" style="display: none; max-width: 600px; margin: auto; width: 100%;">
+      <h2>対戦準備</h2>
+      <div style="display: flex; flex-direction: column; gap: 15px;">
+        <p>合言葉を友達に伝えてください：</p>
+        <div id="room-code-display" class="code-display">----</div>
+        
+        <h3>参加プレイヤー一覧</h3>
+        <ul id="waiting-players-list" class="member-list">
+          <!-- 参加メンバーが動的に追加されます -->
+        </ul>
+
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <button id="btn-leave-waiting" class="btn-wafu btn-wafu-secondary" style="flex: 1;">退出する</button>
+          <button id="btn-start-game" class="btn-wafu btn-wafu-gold btn-disabled" style="flex: 1;">対戦開始</button>
+        </div>
+        <p id="waiting-status-text" style="font-size: 0.8rem; color: var(--color-muted); text-align: center;">
+          他のプレイヤーの接続を待っています（ホストのみ開始可能）...
+        </p>
+      </div>
+    </div>
+
+    <!-- ゲーム画面 -->
+    <div id="game-screen" class="game-layout" style="display: none;">
+      <!-- メイン対戦テーブル -->
+      <div class="table-area">
+        <!-- ポット＆中央情報 -->
+        <div class="table-center">
+          <div class="bet-round-info" id="bet-round-text">ラウンド 1</div>
+          <div class="pot-container">
+            <span class="pot-label">得点壺</span>
+            <div style="display: flex; align-items: center; gap: 3px;">
+              <span class="chip-token"></span>
+              <span class="pot-value" id="pot-value">0</span>
+            </div>
+          </div>
+          <div style="font-size: 0.75rem; color: var(--color-muted);" id="deck-count-text">山札: 21枚</div>
+          <div id="current-turn-text" style="font-family: var(--font-serif); font-size: 1.05rem; color: var(--color-gold-light); font-weight: bold; margin-top: 5px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); min-height: 1.5em;">手番: --</div>
+          
+          <!-- 局開始ボタン (配札前のみ表示) -->
+          <button id="btn-deal-hand" class="btn-wafu btn-wafu-gold" style="margin-top: 10px; display: none; padding: 8px 20px; font-size: 0.95rem;">局を開始する (配札)</button>
+          <div id="waiting-host-deal-text" style="font-size: 0.85rem; color: var(--color-muted); display: none; margin-top: 10px;">親が局を開始するのを待っています...</div>
+        </div>
+
+        <!-- プレイヤー座席 -->
+        <div id="seat-top" class="player-seat seat-top">
+          <div class="player-panel" id="panel-player2">
+            <span class="dealer-button" id="dealer-btn-player2" style="display: none;">親</span>
+            <div class="player-name" id="name-player2">CPU 1</div>
+            <div class="player-chips"><span class="chip-token"></span><span id="chips-player2">100</span></div>
+            <div class="player-mini-cards" id="cards-player2"></div>
+            <div class="player-status-badge" id="badge-player2" style="display: none;"></div>
+          </div>
+        </div>
+
+        <div id="seat-left" class="player-seat seat-left">
+          <div class="player-panel" id="panel-player3">
+            <span class="dealer-button" id="dealer-btn-player3" style="display: none;">親</span>
+            <div class="player-name" id="name-player3">CPU 2</div>
+            <div class="player-chips"><span class="chip-token"></span><span id="chips-player3">100</span></div>
+            <div class="player-mini-cards" id="cards-player3"></div>
+            <div class="player-status-badge" id="badge-player3" style="display: none;"></div>
+          </div>
+        </div>
+
+        <div id="seat-right" class="player-seat seat-right">
+          <div class="player-panel" id="panel-player4">
+            <span class="dealer-button" id="dealer-btn-player4" style="display: none;">親</span>
+            <div class="player-name" id="name-player4">CPU 3</div>
+            <div class="player-chips"><span class="chip-token"></span><span id="chips-player4">100</span></div>
+            <div class="player-mini-cards" id="cards-player4"></div>
+            <div class="player-status-badge" id="badge-player4" style="display: none;"></div>
+          </div>
+        </div>
+
+        <div id="seat-bottom" class="player-seat seat-bottom" style="display: flex; align-items: center; gap: 15px; bottom: 15px;">
+          <!-- 自分の情報パネルと役判定表示 -->
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+            <div class="player-panel active-turn" id="panel-player1" style="min-width: 120px;">
+              <span class="dealer-button" id="dealer-btn-player1" style="display: none;">親</span>
+              <div class="player-name" id="name-player1">あなた</div>
+              <div class="player-chips"><span class="chip-token"></span><span id="chips-player1">100</span></div>
+              <div class="player-status-badge" id="badge-player1" style="display: none;"></div>
+            </div>
+            <div id="my-hand-rank" style="font-family: var(--font-serif); font-size: 0.9rem; color: var(--color-gold-light); font-weight: bold; min-height: 1.2em; white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,0.8);">
+              手札: --
+            </div>
+          </div>
+          <!-- 自分の手札カード (テーブル内に配置) -->
+          <div class="my-cards-container" id="my-hand-container" style="margin: 0;"></div>
+        </div>
+      </div>
+
+      <!-- アクション操作パネル -->
+      <div class="action-controls" id="action-controls-panel">
+        <div class="action-buttons-group">
+          <button id="btn-fold" class="btn-wafu btn-wafu-secondary">降参 (Fold)</button>
+          <button id="btn-call" class="btn-wafu">同額 (Call: 0)</button>
+        </div>
+        
+        <div class="slider-container" id="raise-slider-container">
+          <div class="slider-label-val">
+            <span>上乗せ額 (Raise)</span>
+            <span id="raise-val-display"><span class="chip-token"></span> 1</span>
+          </div>
+          <input type="range" id="raise-slider" class="wafu-range" min="1" max="3" step="1" value="1">
+          <button id="btn-raise" class="btn-wafu btn-wafu-gold" style="margin-top: 5px; padding: 8px;">上乗せ決定 (Raise)</button>
+        </div>
+      </div>
+
+      <!-- 対戦履歴・ゲームログ -->
+      <div class="game-log-panel" id="game-log">
+        <div class="log-entry log-system">株ポーカーへようこそ。モードを選択してください。</div>
+      </div>
+
+      <div style="text-align: right;">
+        <button id="btn-exit-game" class="btn-wafu btn-wafu-secondary" style="padding: 6px 15px; font-size: 0.85rem;">退室する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ルーレットモーダル -->
+  <div id="roulette-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h2 class="modal-title">お祝儀ルーレット！</h2>
+      <p style="font-size: 0.9rem; margin-bottom: 15px;">
+        <span class="log-highlight" id="roulette-winner-name">プレイヤー</span>が「1.1 (ピンゾロ)」で勝利したため、お祝儀ルーレットが発生！<br>
+        山札から1枚引き、その「数字 × 3チップ」を敗者全員から獲得します。
+      </p>
+      
+      <div class="roulette-wrapper">
+        <div class="roulette-pointer"></div>
+        <div id="roulette-wheel" class="roulette-wheel"></div>
+      </div>
+
+      <button id="btn-spin-roulette" class="btn-wafu btn-wafu-gold" style="width: 100%; margin-top: 15px;">ルーレットを回す！</button>
+      <div id="roulette-result-text" class="showdown-banner" style="display: none; font-size: 1.2rem;">結果: --</div>
+      <button id="btn-close-roulette" class="btn-wafu" style="display: none; width: 100%; margin-top: 10px;">次へ</button>
+    </div>
+  </div>
+
+  <!-- 勝敗結果・ショーダウンモーダル -->
+  <div id="showdown-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+      <h2 class="modal-title">勝負 (Showdown)</h2>
+      <div id="showdown-players-container" style="display: flex; flex-direction: column; gap: 15px; margin: 20px 0;"></div>
+      <div id="showdown-winner-banner" class="showdown-banner">勝利者: --</div>
+      <div id="showdown-celebration-info" style="font-size: 0.9rem; color: var(--color-muted); margin-bottom: 20px; line-height: 1.6;"></div>
+      <button id="btn-next-hand" class="btn-wafu btn-wafu-gold" style="width: 100%;">次の局へ</button>
+    </div>
+  </div>
+
+  <!-- ルール説明モーダル -->
+  <div id="rules-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content rules-modal-content">
+      <h2 class="modal-title">株ポーカー 役・ルール</h2>
+      <div style="line-height: 1.6; font-size: 0.95rem;">
+        <h3>基本の遊び方</h3>
+        <p>山札21枚（2〜10が各2枚、1が3枚）から各プレイヤーに2枚ずつ配られます。</p>
+        <p>参加費（1チップ）を支払い、3ターンのベットラウンド（賭け金上乗せ：1〜3チップ、チェック不可）を競い合います。フォールド（降参）せずに残ったメンバーで手札を公開し、最強の役を持つ者がその局のポット（集まったチップ）を獲得します。</p>
+        
+        <h3 style="margin-top: 15px;">役の強さ（弱い順）</h3>
+        <table class="rules-table">
+          <thead>
+            <tr>
+              <th>役名</th>
+              <th>組み合わせ</th>
+              <th>特徴</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ブタ (0点)</td>
+              <td>合計の一桁目が 0</td>
+              <td>最弱の手。しかしこれで全員を下ろせば「お祝儀（各3チップ）」</td>
+            </tr>
+            <tr>
+              <td>1点 〜 9点 (カブ)</td>
+              <td>合計の一桁目が 1〜9</td>
+              <td>数字が大きいほど強い（9点＝カブが通常最強）</td>
+            </tr>
+            <tr>
+              <td>しっぴん (4.1)</td>
+              <td>1 と 4</td>
+              <td>特殊役。ここから通常点数より強い</td>
+            </tr>
+            <tr>
+              <td>くっピン (9.1)</td>
+              <td>1 と 9</td>
+              <td>特殊役</td>
+            </tr>
+            <tr>
+              <td>とっぴん (10.1)</td>
+              <td>1 と 10</td>
+              <td>特殊役</td>
+            </tr>
+            <tr>
+              <td>ゾロ目 (1.1 〜 10.10)</td>
+              <td>同じ数字2枚</td>
+              <td>数字が大きいほど強い。1.1 &lt; 2.2 &lt; ... &lt; 10.10</td>
+            </tr>
+            <tr>
+              <td>十ゾロ (10.10)</td>
+              <td>10 と 10</td>
+              <td>最強の役。ただし「1.2」にのみ敗北する</td>
+            </tr>
+            <tr style="background: rgba(184,28,34,0.15);">
+              <td>10.10キラー (1.2)</td>
+              <td>1 と 2</td>
+              <td>通常は単なる「3点」だが、場に「10.10」がいる場合のみ、それを倒して最強となる</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: 15px;">お祝儀（ボーナス）ルール</h3>
+        <ul>
+          <li><strong>ブタ(0点)ブラフ</strong>: 0点の手札で全員をフォールドさせて勝利した場合、各プレイヤーから3チップずつ受け取ります。</li>
+          <li><strong>ピンゾロ(1.1)勝利</strong>: ルーレットを回し、出た目の数×3チップを敗者全員から受け取ります。</li>
+          <li><strong>十ゾロ(10.10)勝利</strong>: 敗者全員から20チップずつ受け取ります（ただし1.2に敗れた場合は無効）。</li>
+        </ul>
+      </div>
+      <button id="btn-close-rules" class="btn-wafu btn-wafu-gold" style="width: 100%; margin-top: 20px;">閉じる</button>
+    </div>
+  </div>
+
+  <!-- ゲームのコアスクリプトをインライン化して読み込み制限を完全回避 -->
+  <script>
+    // ==========================================
+    // 0. エラーハンドラ & デバッグログ出力機能
+    // ==========================================
+    function debugLog(msg) {
+      const el = document.getElementById("debug-log");
+      if (el) {
+        el.innerHTML += "<br>> " + msg;
+        el.scrollTop = el.scrollHeight;
+      }
+      console.log("[DEBUG LOG]", msg);
+    }
+
+    window.onerror = function(message, source, lineno, colno, error) {
+      // 外部CDN等のCORSに起因する Script error. は無視
+      if (message === "Script error.") {
+        debugLog("無視されたクロスオリジンエラー (Script error.)");
+        return true;
+      }
+      const errMsg = `ERROR: ${message} (${source ? source.split('/').pop() : 'unknown'}:${lineno})`;
+      debugLog(errMsg);
+      console.error(error);
+      alert("【起動エラー】問題が発生しました:\n" + message + "\n\nファイル: " + (source ? source.split('/').pop() : "unknown") + "\n行番号: " + lineno);
+      return false;
+    };
+
+    // ==========================================
+    // 1. 役判定エンジン (evaluator.js)
+    // ==========================================
+    const Evaluator = (function() {
+      const HAND_TYPES = {
+        ZORO_10: 19, ZORO_9: 18, ZORO_8: 17, ZORO_7: 16, ZORO_6: 15, ZORO_5: 14,
+        ZORO_4: 13, ZORO_3: 12, ZORO_2: 11, ZORO_1: 10, TOPPIN: 9, KUPPIN: 8,
+        SHIPPIN: 7, POINTS_9: 6, POINTS_8: 5, POINTS_7: 4, POINTS_6: 3, POINTS_5: 2,
+        POINTS_4: 1, POINTS_3: 0, POINTS_2: -1, POINTS_1: -2, POINTS_0: -3
+      };
+
+      const HAND_NAMES = {
+        [HAND_TYPES.ZORO_10]: "じゅんじゅん (10.10)",
+        [HAND_TYPES.ZORO_9]: "九ゾロ (9.9)",
+        [HAND_TYPES.ZORO_8]: "八ゾロ (8.8)",
+        [HAND_TYPES.ZORO_7]: "七ゾロ (7.7)",
+        [HAND_TYPES.ZORO_6]: "六ゾロ (6.6)",
+        [HAND_TYPES.ZORO_5]: "五ゾロ (5.5)",
+        [HAND_TYPES.ZORO_4]: "四ゾロ (4.4)",
+        [HAND_TYPES.ZORO_3]: "三ゾロ (3.3)",
+        [HAND_TYPES.ZORO_2]: "二ゾロ (2.2)",
+        [HAND_TYPES.ZORO_1]: "ピンピン (1.1)",
+        [HAND_TYPES.TOPPIN]: "とっぴん (10.1)",
+        [HAND_TYPES.KUPPIN]: "くっピン (9.1)",
+        [HAND_TYPES.SHIPPIN]: "しっぴん (4.1)",
+        [HAND_TYPES.POINTS_9]: "九点 (カブ)",
+        [HAND_TYPES.POINTS_8]: "八点 (オイチョ)",
+        [HAND_TYPES.POINTS_7]: "七点 (ナキ)",
+        [HAND_TYPES.POINTS_6]: "六点 (ロッポウ)",
+        [HAND_TYPES.POINTS_5]: "五点 (ゴケ)",
+        [HAND_TYPES.POINTS_4]: "四点 (ヨツ)",
+        [HAND_TYPES.POINTS_3]: "三点 (サンタ)",
+        [HAND_TYPES.POINTS_2]: "二点 (ニタ)",
+        [HAND_TYPES.POINTS_1]: "一点 (ピン)",
+        [HAND_TYPES.POINTS_0]: "ブタ (0点)"
+      };
+
+      function evaluateHand(hand) {
+        if (!hand || hand.length !== 2) throw new Error("手札は2枚である必要があります");
+        const cards = [...hand].sort((a, b) => a - b);
+        const [c1, c2] = cards;
+        if (c1 === c2) {
+          const type = HAND_TYPES.ZORO_1 + (c1 - 1);
+          return { type, name: HAND_NAMES[type], cards };
+        }
+        if (c1 === 1 && c2 === 4) return { type: HAND_TYPES.SHIPPIN, name: HAND_NAMES[HAND_TYPES.SHIPPIN], cards };
+        if (c1 === 1 && c2 === 9) return { type: HAND_TYPES.KUPPIN, name: HAND_NAMES[HAND_TYPES.KUPPIN], cards };
+        if (c1 === 1 && c2 === 10) return { type: HAND_TYPES.TOPPIN, name: HAND_NAMES[HAND_TYPES.TOPPIN], cards };
+
+        const sum = c1 + c2;
+        const points = sum % 10;
+        const type = HAND_TYPES.POINTS_0 + points;
+        return { type, name: HAND_NAMES[type], cards };
+      }
+
+      function determineWinners(players) {
+        if (!players || players.length === 0) return { winners: [], details: {} };
+        const evaluatedPlayers = players.map(p => {
+          const evaluation = evaluateHand(p.hand);
+          return {
+            id: p.id, name: p.name, hand: p.hand, evaluation,
+            is1_2: (Math.min(...p.hand) === 1 && Math.max(...p.hand) === 2),
+            is10_10: (p.hand[0] === 10 && p.hand[1] === 10)
+          };
+        });
+        const has10_10 = evaluatedPlayers.some(p => p.is10_10);
+        const has1_2 = evaluatedPlayers.some(p => p.is1_2);
+        const killerTriggered = has10_10 && has1_2;
+
+        const scoredPlayers = evaluatedPlayers.map(p => {
+          let effectiveScore = p.evaluation.type;
+          let customName = p.evaluation.name;
+          if (killerTriggered) {
+            if (p.is1_2) {
+              effectiveScore = HAND_TYPES.ZORO_10 + 1;
+              customName = "10.10キラー (1.2)";
+            } else if (p.is10_10) {
+              effectiveScore = HAND_TYPES.POINTS_0 - 1;
+              customName = "10.10 (キラー撃破)";
+            }
+          }
+          return { ...p, effectiveScore, customName };
+        });
+
+        let maxScore = -Infinity;
+        scoredPlayers.forEach(p => {
+          if (p.effectiveScore > maxScore) maxScore = p.effectiveScore;
+        });
+
+        const winners = scoredPlayers.filter(p => p.effectiveScore === maxScore).map(p => p.id);
+        return {
+          winners,
+          players: scoredPlayers.map(p => ({
+            id: p.id, name: p.name, hand: p.hand, evaluatedName: p.customName, score: p.effectiveScore, isWinner: winners.includes(p.id)
+          })),
+          killerTriggered
+        };
+      }
+
+      return { HAND_TYPES, HAND_NAMES, evaluateHand, determineWinners };
+    })();
+    window.Evaluator = Evaluator;
+
+    // ==========================================
+    // 2. CPU AIロジック (cpuPlayer.js)
+    // ==========================================
+    const decideCpuAction = (function() {
+      return function({ hand, currentBet, myCurrentBet, chips, pot, round, roundRaiseTotal = 0, playersInGame, aggression = 0.5 }) {
+        const { evaluateHand, HAND_TYPES } = window.Evaluator;
+        const evaluation = evaluateHand(hand);
+        const type = evaluation.type;
+        
+        let callAmount = currentBet - myCurrentBet;
+        if (callAmount === 0) {
+          callAmount = 1; // 常に最低1ベットルール
+        }
+        
+        if (chips <= 0) return { action: "call", amount: 0 };
+
+        // 1. 手札の自信度 (confidence) の算出 (0.0 〜 1.0)
+        let confidence = 0.0;
+        if (type >= HAND_TYPES.ZORO_1) {
+          const zoroOffset = type - HAND_TYPES.ZORO_1;
+          confidence = 0.85 + (zoroOffset / 9) * 0.15; // ゾロ目は 0.85〜1.0
+        } else if (type >= HAND_TYPES.SHIPPIN) {
+          const specialOffset = type - HAND_TYPES.SHIPPIN;
+          confidence = 0.75 + (specialOffset / 2) * 0.07; // シッピン・クッピンは 0.75〜0.89
+        } else {
+          const points = type - HAND_TYPES.POINTS_0;
+          confidence = 0.1 + (points / 9) * 0.6; // 0点〜9点は 0.1〜0.7
+        }
+
+        // 1.2 (三点) は十ゾロキラーの特殊役なので、ゲーム後半（3周目など）で少し自信を高める
+        const is1_2 = (hand && hand.length === 2 && Math.min(...hand) === 1 && Math.max(...hand) === 2);
+        if (is1_2) confidence = 0.3 + (round * 0.1);
+
+        // aggressionの補正
+        confidence = confidence * (0.8 + aggression * 0.4);
+        confidence = Math.min(1.0, Math.max(0.0, confidence));
+
+        // ブラフをするかどうかの判定 (手が弱くても一定確率で強気に攻める)
+        let isBluffing = (type <= HAND_TYPES.POINTS_3) && (Math.random() < (0.08 + aggression * 0.14));
+        
+        // 【ブラフの引き際ルール】
+        // 弱い手でのブラフ時、相手がすでに2チップ以上の強気なレイズを仕掛けてきている場合は、
+        // 勝ち目がないと判断してブラフを完全に諦め、コールせずにフォールド（降参）を選択します。
+        if (isBluffing && callAmount >= 2) {
+          isBluffing = false;
+        }
+        
+        // 最小・最大レイズ可能額の決定
+        const minRaise = 1;
+        const remainingRaiseLimit = Math.max(0, 3 - roundRaiseTotal);
+        const maxRaise = Math.min(remainingRaiseLimit, chips - callAmount);
+
+        // オールイン（全賭け）を要求されている場合
+        if (callAmount >= chips) {
+          // 相手が全賭け（または超特大ベット）を要求してきた場合：
+          // かなり強い手(自信 0.65 以上)か、ブラフ中でなければコールしない（フォールドする）
+          if (confidence > 0.65 || isBluffing) {
+            return { action: "call", amount: chips };
+          } else {
+            return { action: "fold", amount: 0 };
+          }
+        }
+
+        // 2. 相手のレイズの「脅威度(threat)」を計算 (ポットに対するコール額の比率)
+        const threat = callAmount / Math.max(1, pot);
+
+        // 3. ポットオッズ (支払う額に対して得られるポットの大きさの比率)
+        const potOdds = callAmount / (pot + callAmount);
+
+        // 4. コール（勝負に残る）に必要な目標自信度の設定
+        // 基本値は 0.35。相手のレイズが大きい（threatが高い）ほど、警戒して目標を高くする（最大0.75まで上昇）
+        let requiredCallConfidence = 0.35 + Math.min(0.4, threat * 0.25);
+        
+        // ただし、ポットオッズが良い（少額のコールで大金が得られるチャンス、potOddsが低い）場合は、目標を緩和する
+        if (potOdds < 0.25) {
+          requiredCallConfidence -= (0.25 - potOdds) * 0.6; // 最大で 0.15 程度引き下げる
+        }
+        requiredCallConfidence = Math.max(0.18, requiredCallConfidence); // 最低閾値を0.18に
+
+        // 5. ポットサイズに応じた2〜3周目の警戒フォールド (逆オッズ考慮)
+        // 手札が 7点または8点 (confidenceが 0.5〜0.65 の範囲) という「中途半端に強い手」のとき、
+        // 2周目以降でポットが非常に大きく(20チップ以上)、コール額も高い(2以上)場合は、
+        // 相手がゾロ目や9点などの最強クラスの手を持っていると推測して、安全にフォールドすることを検討します。
+        const isMediumStrong = (type === HAND_TYPES.POINTS_7 || type === HAND_TYPES.POINTS_8);
+        const isDangerousBigPot = (round >= 2 && pot >= 20 && callAmount >= 2);
+        
+        if (isMediumStrong && isDangerousBigPot) {
+          // 慎重なCPUほど降りやすくする (フォールド確率 50%〜85%)
+          const foldProb = 0.85 - aggression * 0.4;
+          if (Math.random() < foldProb) {
+            debugLog(`CPU AI: 大ポット警戒フォールド発動 (手札強さ: ${evaluation.name}, ポット: ${pot}, コール必要額: ${callAmount})`);
+            return { action: "fold", amount: 0 };
+          }
+        }
+
+        // 6. アクションの選択
+        // 自信が非常に高い、またはブラフを仕掛ける場合 ➔ レイズ（上乗せ）を検討
+        if (confidence > 0.72 || isBluffing) {
+          // 強い手を持っている時、ポットサイズがまだ小さい場合はレイズしてポットを大きくしようとする
+          const shouldRaise = (pot < 15 && Math.random() < 0.65) || (Math.random() < 0.4);
+          if (maxRaise >= minRaise && shouldRaise) {
+            const raiseAmount = Math.floor(Math.random() * (maxRaise - minRaise + 1)) + minRaise;
+            return { action: "raise", amount: callAmount + raiseAmount };
+          } else {
+            return { action: "call", amount: callAmount };
+          }
+        } 
+        // 自信がコールの目標閾値を超えている場合 ➔ コール（ベット）
+        else if (confidence >= requiredCallConfidence) {
+          return { action: "call", amount: callAmount };
+        } 
+        // 条件を満たさない ➔ 降参（フォールド）
+        else {
+          return { action: "fold", amount: 0 };
+        }
+      };
+    })();
+    window.decideCpuAction = decideCpuAction;
+
+    // ==========================================
+    // 3. P2P通信 (peerManager.js)
+    // ==========================================
+    const PeerManager = (function() {
+      class PM {
+        constructor({ onMessage, onConnectionChange, onIdReady }) {
+          this.peer = null;
+          this.connections = {};
+          this.hostConnection = null;
+          this.isHost = false;
+          this.peerId = null;
+          this.onMessage = onMessage || (() => {});
+          this.onConnectionChange = onConnectionChange || (() => {});
+          this.onIdReady = onIdReady || (() => {});
+        }
+        initHost(customId = null) {
+          this.isHost = true;
+          this.cleanup();
+          const roomId = customId || `kabu-${Math.floor(1000 + Math.random() * 9000)}`;
+          // @ts-ignore
+          this.peer = new Peer(roomId, { debug: 1 });
+          this.peer.on("open", (id) => {
+            this.peerId = id;
+            this.onIdReady(id);
+          });
+          this.peer.on("connection", (conn) => { this.setupHostConnection(conn); });
+          this.peer.on("error", (err) => {
+            console.error("PeerJS Error (Host):", err);
+            if (err.type === "unavailable-id") {
+              const nextId = `kabu-${Math.floor(1000 + Math.random() * 9000)}`;
+              this.initHost(nextId);
+            }
+          });
+        }
+        initClient(hostId) {
+          this.isHost = false;
+          this.cleanup();
+          // @ts-ignore
+          this.peer = new Peer({ debug: 1 });
+          this.peer.on("open", (id) => {
+            this.peerId = id;
+            this.onIdReady(id);
+            const conn = this.peer.connect(hostId, { reliable: true });
+            this.setupClientConnection(conn);
+          });
+          this.peer.on("error", (err) => { console.error("PeerJS Error (Client):", err); });
+        }
+        setupHostConnection(conn) {
+          const peerId = conn.peer;
+          this.connections[peerId] = conn;
+          conn.on("open", () => { this.onConnectionChange(peerId, "connected"); });
+          conn.on("data", (data) => { this.onMessage(peerId, data); });
+          conn.on("close", () => { delete this.connections[peerId]; this.onConnectionChange(peerId, "disconnected"); });
+          conn.on("error", (err) => { delete this.connections[peerId]; this.onConnectionChange(peerId, "disconnected"); });
+        }
+        setupClientConnection(conn) {
+          this.hostConnection = conn;
+          conn.on("open", () => { this.onConnectionChange(conn.peer, "connected"); });
+          conn.on("data", (data) => { this.onMessage(conn.peer, data); });
+          conn.on("close", () => { this.hostConnection = null; this.onConnectionChange(conn.peer, "disconnected"); });
+          conn.on("error", (err) => { this.hostConnection = null; this.onConnectionChange(conn.peer, "disconnected"); });
+        }
+        send(targetId, data) {
+          if (this.isHost) {
+            if (targetId) {
+              const conn = this.connections[targetId];
+              if (conn && conn.open) conn.send(data);
+            } else {
+              Object.values(this.connections).forEach(c => { if (c.open) c.send(data); });
+            }
+          } else {
+            if (this.hostConnection && this.hostConnection.open) this.hostConnection.send(data);
+          }
+        }
+        cleanup() {
+          if (this.peer) { this.peer.destroy(); this.peer = null; }
+          this.connections = {};
+          this.hostConnection = null;
+          this.peerId = null;
+        }
+      }
+      return PM;
+    })();
+    window.PeerManager = PeerManager;
+
+    // ==========================================
+    // 4. ゲームメインアプリ (app.js)
+    // ==========================================
+    (function() {
+      const { evaluateHand, determineWinners, HAND_TYPES, HAND_NAMES } = window.Evaluator;
+      const decideCpuAction = window.decideCpuAction;
+      const PeerManager = window.PeerManager;
+
+      // confetti の安全フォールバック
+      const confetti = window.confetti || function() { debugLog("紙吹雪ライブラリ未ロード"); };
+
+      // --- アプリケーション状態 ---
+      const state = {
+        mode: "lobby", gameType: "cpu", myId: "", myName: "プレイヤー", roomCode: "", isHost: false,
+        players: [], deck: [], pot: 0, currentBet: 0, betRound: 1, activePlayerIndex: 0, dealerIndex: 0,
+        startingPlayerIndex: 0, lastAggressorIndex: -1, actionCount: 0, rouletteWinnerId: "", rouletteCardValue: 0,
+        isTsuki: false, tsukiResults: null, tsukiGiftText: null
+      };
+
+      const INITIAL_CHIPS = 100;
+      const ANTE = 1;
+
+      // --- DOM 要素 ---
+      const screens = {
+        lobby: document.getElementById("lobby-screen"),
+        waiting: document.getElementById("waiting-screen"),
+        game: document.getElementById("game-screen")
+      };
+      const lobbyInputs = {
+        name: document.getElementById("player-name-input"),
+        joinCode: document.getElementById("join-room-input")
+      };
+      const lobbyButtons = {
+        cpu: document.getElementById("btn-cpu-mode"),
+        create: document.getElementById("btn-create-room"),
+        join: document.getElementById("btn-join-room")
+      };
+      const waitingElems = {
+        code: document.getElementById("room-code-display"),
+        list: document.getElementById("waiting-players-list"),
+        start: document.getElementById("btn-start-game"),
+        leave: document.getElementById("btn-leave-waiting"),
+        status: document.getElementById("waiting-status-text")
+      };
+      const gameElems = {
+        pot: document.getElementById("pot-value"),
+        roundText: document.getElementById("bet-round-text"),
+        deckText: document.getElementById("deck-count-text"),
+        log: document.getElementById("game-log"),
+        myHandContainer: document.getElementById("my-hand-container"),
+        myHandRank: document.getElementById("my-hand-rank"),
+        actionPanel: document.getElementById("action-controls-panel"),
+        btnFold: document.getElementById("btn-fold"),
+        btnCall: document.getElementById("btn-call"),
+        btnRaise: document.getElementById("btn-raise"),
+        raiseSlider: document.getElementById("raise-slider"),
+        raiseVal: document.getElementById("raise-val-display"),
+        exitGame: document.getElementById("btn-exit-game"),
+        btnDealHand: document.getElementById("btn-deal-hand"),
+        turnText: document.getElementById("current-turn-text")
+      };
+      const modals = {
+        rules: document.getElementById("rules-modal"),
+        rulesToggle: document.getElementById("rules-toggle-btn"),
+        rulesClose: document.getElementById("btn-close-rules"),
+        roulette: document.getElementById("roulette-modal"),
+        rouletteWinner: document.getElementById("roulette-winner-name"),
+        rouletteWheel: document.getElementById("roulette-wheel"),
+        btnSpin: document.getElementById("btn-spin-roulette"),
+        rouletteResultText: document.getElementById("roulette-result-text"),
+        btnCloseRoulette: document.getElementById("btn-close-roulette"),
+        showdown: document.getElementById("showdown-modal"),
+        showdownPlayers: document.getElementById("showdown-players-container"),
+        showdownBanner: document.getElementById("showdown-winner-banner"),
+        showdownCelebration: document.getElementById("showdown-celebration-info"),
+        btnNextHand: document.getElementById("btn-next-hand")
+      };
+
+      let peerManager = null;
+
+      function initializeApp() {
+        debugLog("アプリの初期設定を実行中 (initializeApp)...");
+        setupEventListeners();
+        loadSavedName();
+        initRouletteWheel();
+        debugLog("初期設定完了。ロビー待機中。");
+      }
+      if (document.readyState === "loading") {
+        window.addEventListener("DOMContentLoaded", initializeApp);
+      } else {
+        initializeApp();
+      }
+
+      function loadSavedName() {
+        const saved = localStorage.getItem("kabu_poker_name");
+        if (saved) {
+          lobbyInputs.name.value = saved;
+          state.myName = saved;
+        }
+      }
+
+      function setupEventListeners() {
+        lobbyButtons.cpu.addEventListener("click", startCpuMode);
+        lobbyButtons.create.addEventListener("click", createOnlineRoom);
+        lobbyButtons.join.addEventListener("click", joinOnlineRoom);
+        
+        lobbyInputs.name.addEventListener("change", (e) => {
+          state.myName = e.target.value.trim() || "プレイヤー";
+          localStorage.setItem("kabu_poker_name", state.myName);
+        });
+
+        waitingElems.start.addEventListener("click", startOnlineGame);
+        waitingElems.leave.addEventListener("click", leaveWaitingRoom);
+
+        gameElems.btnFold.addEventListener("click", () => handlePlayerAction("fold"));
+        gameElems.btnCall.addEventListener("click", () => handlePlayerAction("call"));
+        gameElems.btnRaise.addEventListener("click", () => {
+          const amount = parseInt(gameElems.raiseSlider.value, 10);
+          handlePlayerAction("raise", amount);
+        });
+        gameElems.raiseSlider.addEventListener("input", (e) => {
+          gameElems.raiseVal.innerHTML = `<span class="chip-token"></span> ${e.target.value}`;
+        });
+        gameElems.exitGame.addEventListener("click", exitToLobby);
+        
+        gameElems.btnDealHand.addEventListener("click", handleDealHandClick);
+
+        modals.rulesToggle.addEventListener("click", () => modals.rules.style.display = "flex");
+        modals.rulesClose.addEventListener("click", () => modals.rules.style.display = "none");
+        modals.rules.addEventListener("click", (e) => { if (e.target === modals.rules) modals.rules.style.display = "none"; });
+
+        modals.btnSpin.addEventListener("click", spinRouletteWheel);
+        modals.btnCloseRoulette.addEventListener("click", closeRouletteAndProceed);
+        modals.btnNextHand.addEventListener("click", startNextHand);
+
+        waitingElems.code.addEventListener("click", () => {
+          navigator.clipboard.writeText(waitingElems.code.textContent);
+          addLog("システム", "合言葉をコピーしました！", "log-system");
+        });
+      }
+
+      function showScreen(screenKey) {
+        debugLog("画面切り替え: " + screenKey);
+        Object.keys(screens).forEach(key => {
+          if (screens[key]) {
+            screens[key].style.display = key === screenKey ? "flex" : "none";
+          }
+        });
+      }
+
+      function addLog(sender, text, className = "") {
+        const logDiv = gameElems.log;
+        if (!logDiv) return;
+        const entry = document.createElement("div");
+        entry.className = `log-entry ${className}`;
+        entry.innerHTML = sender ? `<span class="log-highlight">${sender}</span>: ${text}` : text;
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+      }
+
+      function generateDeck() {
+        const deck = [1, 1, 1];
+        for (let i = 2; i <= 10; i++) deck.push(i, i);
+        return deck;
+      }
+
+      function shuffle(array) {
+        const arr = [...array];
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+      }
+
+      // 「局を開始する」ボタン押下ハンドラ
+      function handleDealHandClick() {
+        if (state.gameType === "online" && !state.isHost) return;
+        debugLog("「局を開始する」ボタンがクリックされました。配札を実行します。");
+        state.mode = "game";
+        initHand();
+      }
+
+      function startNewRound(roundNum) {
+        state.betRound = roundNum;
+        state.roundRaiseTotal = 0; // その周の累積レイズ数をリセット
+        state.currentBet = 0;      // その周の最高ベット額をリセット
+        state.lastAggressorIndex = -1;
+        
+        state.players.forEach(p => {
+          p.roundBet = 0;          // その周でのベット額をリセット
+          p.hasActedInRound = false; // アクションフラグをリセット
+        });
+        
+        // 2周目、3周目のスタートプレイヤーは、親（dealerIndex）から！
+        state.activePlayerIndex = state.dealerIndex;
+        
+        // ログ表示
+        addLog(null, `--- ${roundNum}周目 / 3周 ---`, "log-system");
+        
+        if (state.gameType === "online" && state.isHost) {
+          broadcastGameState();
+        } else {
+          updateUI();
+          startTurn();
+        }
+      }
+
+      function initHand() {
+        debugLog("局の初期化 (initHand) 開始");
+        addLog(null, "--- 新しい局が始まりました ---", "log-system");
+        if (state.isHost) {
+          state.deck = shuffle(generateDeck());
+          debugLog("山札シャッフル完了: 21枚");
+          state.pot = 0;
+          
+          state.players.forEach((p, idx) => {
+            p.isFolded = false;
+            p.totalBet = 0;
+            p.roundBet = 0;
+            p.hasActedInRound = false;
+            const antePaid = Math.min(p.chips, ANTE);
+            p.chips -= antePaid;
+            p.totalBet += antePaid;
+            state.pot += antePaid;
+            p.hand = [state.deck.pop(), state.deck.pop()];
+            debugLog(`${p.name} に手札配分: [${p.hand[0]}, ${p.hand[1]}]`);
+          });
+          
+          // 1周目を開始する
+          startNewRound(1);
+        }
+      }
+
+      let _skipCounter = 0; // 無限スキップループ防止カウンタ
+      function startTurn() {
+        if (state.mode !== "game") return;
+        
+        if (!state.players || state.players.length === 0) {
+          debugLog("警告: players配列が空のためターンを開始できません");
+          return;
+        }
+        const activePlayer = state.players[state.activePlayerIndex];
+        if (!activePlayer) {
+          debugLog("警告: activePlayerが未定義のためターンを開始できません");
+          return;
+        }
+        debugLog(`ターン開始: 現在のアクティブプレイヤーは ${activePlayer.name} (actionCount=${activePlayer.actionCount})`);
+        
+        // フォールドしている、またはチップがないプレイヤーは手番スキップして次へ
+        if (activePlayer.isFolded || activePlayer.chips <= 0) {
+          activePlayer.hasActedInRound = true;
+          debugLog(`${activePlayer.name} は手番スキップ (フォールド済/チップ無)`);
+          _skipCounter++;
+          if (_skipCounter > state.players.length + 1) {
+            // 全員がスキップされ続けている → 無限ループ防止のため即座にショーダウンへ
+            debugLog("警告: 全員スキップの無限ループを検知。強制ショーダウンへ移行します。");
+            _skipCounter = 0;
+            handleShowdown();
+            return;
+          }
+          moveToNextPlayer();
+          return;
+        }
+        _skipCounter = 0; // アクション可能なプレイヤーに到達したのでカウンタをリセット
+        
+        updateUI();
+        
+        if (activePlayer.id === "me") {
+          addLog(null, "あなたの番です。行動を選択してください。", "log-highlight");
+          enableActionPanel(true);
+        } else {
+          enableActionPanel(false);
+          if (activePlayer.isCpu) {
+            addLog(null, `${activePlayer.name}の思考中...`);
+            setTimeout(() => { executeCpuTurn(activePlayer); }, 300 + Math.random() * 300);
+          }
+        }
+      }
+
+      function executeCpuTurn(cpu) {
+        try {
+          debugLog(`${cpu.name} の意思決定処理を実行中...`);
+          const result = decideCpuAction({
+            hand: cpu.hand, currentBet: state.currentBet, myCurrentBet: cpu.roundBet,
+            chips: cpu.chips, pot: state.pot, round: state.betRound,
+            roundRaiseTotal: state.roundRaiseTotal,
+            playersInGame: state.players.filter(p => !p.isFolded).length, aggression: cpu.aggression || 0.5
+          });
+          debugLog(`${cpu.name} の意思決定結果: action=${result.action}, amount=${result.amount}`);
+          processAction(cpu.id, result.action, result.amount);
+        } catch (e) {
+          console.error(`CPU (${cpu.name}) のターン処理でエラー発生:`, e);
+          // エラーが発生してもゲームを止めない: 安全なコール(最低ベット)にフォールバック
+          const needed = state.currentBet - cpu.roundBet;
+          const safeAmount = needed === 0 ? 1 : needed;
+          if (cpu.chips >= safeAmount) {
+            processAction(cpu.id, "call", safeAmount);
+          } else {
+            processAction(cpu.id, "fold", 0);
+          }
+        }
+      }
+
+      function handlePlayerAction(action, raiseAmount = 0) {
+        const activePlayer = state.players[state.activePlayerIndex];
+        if (!activePlayer || activePlayer.id !== "me") return;
+        let amount = 0;
+        if (action === "call") {
+          const needed = state.currentBet - activePlayer.roundBet;
+          amount = needed === 0 ? 1 : needed;
+        } else if (action === "raise") {
+          const needed = state.currentBet - activePlayer.roundBet;
+          const callCost = needed === 0 ? 1 : needed;
+          amount = callCost + raiseAmount;
+        }
+        debugLog(`プレイヤーアクション入力: ${action}, amount=${amount}`);
+        if (state.gameType === "online" && !state.isHost) {
+          peerManager.send(null, { type: "ACTION", payload: { action, amount } });
+          enableActionPanel(false);
+        } else {
+          processAction("me", action, amount);
+        }
+      }
+
+      // ベット時のチップ移動アニメーションエフェクト
+      function triggerBetChipEffect(playerIndex, amount) {
+        if (amount <= 0) return;
+        
+        const myIndex = state.players.findIndex(p => p.id === "me");
+        if (myIndex === -1) return;
+        
+        const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+        const relativeIdx = (playerIndex - myIndex + state.players.length) % state.players.length;
+        const seatId = seatAssignments[relativeIdx];
+        const seatEl = document.getElementById(seatId);
+        const potEl = document.querySelector(".pot-container");
+        
+        if (!seatEl || !potEl) return;
+        
+        const seatRect = seatEl.getBoundingClientRect();
+        const potRect = potEl.getBoundingClientRect();
+        
+        const startX = seatRect.left + seatRect.width / 2 + window.scrollX;
+        const startY = seatRect.top + seatRect.height / 2 + window.scrollY;
+        const endX = potRect.left + potRect.width / 2 + window.scrollX;
+        const endY = potRect.top + potRect.height / 2 + window.scrollY;
+        
+        // ベット額に応じてチップの枚数を変える (最大3枚)
+        const chipCount = Math.min(3, amount);
+        
+        for (let i = 0; i < chipCount; i++) {
+          setTimeout(() => {
+            const chip = document.createElement("div");
+            chip.style.position = "absolute";
+            chip.style.left = `${startX}px`;
+            chip.style.top = `${startY}px`;
+            chip.style.zIndex = "1000";
+            chip.style.pointerEvents = "none";
+            chip.style.display = "flex";
+            chip.style.alignItems = "center";
+            chip.style.gap = "5px";
+            chip.style.background = "rgba(18, 14, 12, 0.9)";
+            chip.style.border = "1px solid #d4af37";
+            chip.style.borderRadius = "12px";
+            chip.style.padding = "3px 8px";
+            chip.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), 0 0 8px rgba(212,175,55,0.4)";
+            
+            // 金の円形チップトークン
+            const coinDot = document.createElement("span");
+            coinDot.style.width = "10px";
+            coinDot.style.height = "10px";
+            coinDot.style.borderRadius = "50%";
+            coinDot.style.background = "radial-gradient(circle, #fbe695 30%, #d4af37 100%)";
+            coinDot.style.boxShadow = "0 1px 2px rgba(0,0,0,0.4)";
+            
+            // テキスト (+ベット額)
+            const txt = document.createElement("span");
+            txt.style.fontFamily = "var(--font-sans)";
+            txt.style.fontSize = "0.75rem";
+            txt.style.fontWeight = "bold";
+            txt.style.color = "#fbe695";
+            txt.textContent = `+${amount}`;
+            
+            chip.appendChild(coinDot);
+            chip.appendChild(txt);
+            document.body.appendChild(chip);
+            
+            // 少し上にふくらむ放物線軌道
+            const midX = (startX + endX) / 2;
+            const midY = Math.min(startY, endY) - 60 - (i * 20);
+            
+            const anim = chip.animate([
+              { left: `${startX}px`, top: `${startY}px`, transform: "scale(0.8) rotate(0deg)", opacity: 0.3 },
+              { left: `${midX}px`, top: `${midY}px`, transform: "scale(1.2) rotate(180deg)", opacity: 1 },
+              { left: `${endX}px`, top: `${endY}px`, transform: "scale(0.6) rotate(360deg)", opacity: 0.8 }
+            ], {
+              duration: 600,
+              easing: "cubic-bezier(0.25, 0.46, 0.45, 0.94)"
+            });
+            
+            anim.onfinish = () => {
+              chip.remove();
+              // 得点壺のポップアップ（バウンス）アニメーション
+              const potVal = document.getElementById("pot-value");
+              if (potVal) {
+                potVal.animate([
+                  { transform: "scale(1)" },
+                  { transform: "scale(1.2)", color: "#fbe695" },
+                  { transform: "scale(1)" }
+                ], { duration: 150 });
+              }
+            };
+          }, i * 150);
+        }
+      }
+
+      // フォールド時に手元のカードがテーブル中央のポットへ回収されるエフェクト
+      function triggerFoldCardEffect(playerIndex) {
+        const myIndex = state.players.findIndex(p => p.id === "me");
+        if (myIndex === -1) return;
+        
+        const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+        const relativeIdx = (playerIndex - myIndex + state.players.length) % state.players.length;
+        const seatId = seatAssignments[relativeIdx];
+        const seatEl = document.getElementById(seatId);
+        const potEl = document.querySelector(".pot-container");
+        
+        if (!seatEl || !potEl) return;
+        
+        const seatRect = seatEl.getBoundingClientRect();
+        const potRect = potEl.getBoundingClientRect();
+        
+        const startX = seatRect.left + seatRect.width / 2 + window.scrollX;
+        const startY = seatRect.top + seatRect.height / 2 + window.scrollY;
+        const endX = potRect.left + potRect.width / 2 + window.scrollX;
+        const endY = potRect.top + potRect.height / 2 + window.scrollY;
+        
+        // 2枚のカードを少し時間差(0.1秒)で中央へ飛ばして消去する
+        for (let i = 0; i < 2; i++) {
+          setTimeout(() => {
+            const cardBack = document.createElement("div");
+            cardBack.className = "kabu-card card-back";
+            cardBack.style.position = "absolute";
+            cardBack.style.left = `${startX - 25}px`;
+            cardBack.style.top = `${startY - 37}px`;
+            cardBack.style.width = "50px";
+            cardBack.style.height = "75px";
+            cardBack.style.zIndex = "900";
+            cardBack.style.pointerEvents = "none";
+            cardBack.style.boxShadow = "0 4px 10px rgba(0,0,0,0.5)";
+            document.body.appendChild(cardBack);
+            
+            const anim = cardBack.animate([
+              { left: `${startX - 25}px`, top: `${startY - 37}px`, transform: "scale(1) rotate(0deg)", opacity: 1 },
+              { left: `${endX - 25}px`, top: `${endY - 37}px`, transform: "scale(0.2) rotate(180deg)", opacity: 0 }
+            ], {
+              duration: 500,
+              easing: "ease-in"
+            });
+            
+            anim.onfinish = () => {
+              cardBack.remove();
+            };
+          }, i * 100);
+        }
+      }
+
+      function processAction(playerId, action, amount) {
+        const playerIdx = state.players.findIndex(p => p.id === playerId);
+        const player = state.players[playerIdx];
+        if (!player) return;
+        
+        debugLog(`アクション処理中: ${player.name} の ${action} (amount=${amount})`);
+        player.hasActedInRound = true; // アクションフラグを立てる
+        
+        if (action === "fold") {
+          player.isFolded = true;
+          addLog(player.name, "降参 (Fold) しました", "log-danger");
+          triggerFoldCardEffect(playerIdx);
+        } else if (action === "call") {
+          const actualBet = Math.min(player.chips, amount);
+          player.chips -= actualBet;
+          player.roundBet += actualBet;
+          player.totalBet += actualBet;
+          state.pot += actualBet;
+          
+          // 最高ベット額の更新（最低ベットにより currentBet が増える可能性があるため）
+          if (player.roundBet > state.currentBet) {
+            state.currentBet = player.roundBet;
+          }
+          
+          addLog(player.name, `${actualBet} チップを賭けました (Call)`);
+          triggerBetChipEffect(playerIdx, actualBet);
+        } else if (action === "raise") {
+          const needed = state.currentBet - player.roundBet;
+          const baseCall = needed === 0 ? 1 : needed;
+          
+          if (player.chips <= baseCall) {
+            // チップがコール（最低ベット）額以下しかないので、レイズは不可能。
+            // 自動的に「コール（オールイン）」扱いとして処理をフォールバックする
+            const actualBet = player.chips;
+            player.chips = 0;
+            player.roundBet += actualBet;
+            player.totalBet += actualBet;
+            state.pot += actualBet;
+            if (player.roundBet > state.currentBet) {
+              state.currentBet = player.roundBet;
+            }
+            addLog(player.name, `${actualBet} チップを賭けました (Call: オールイン)`);
+            triggerBetChipEffect(playerIdx, actualBet);
+          } else {
+            // 通常のレイズ処理
+            const actualBet = Math.min(player.chips, amount);
+            const raiseAmount = Math.max(0, actualBet - baseCall);
+            state.roundRaiseTotal += raiseAmount;
+            
+            player.chips -= actualBet;
+            player.roundBet += actualBet;
+            player.totalBet += actualBet;
+            state.pot += actualBet;
+            
+            if (player.roundBet > state.currentBet) {
+              state.currentBet = player.roundBet;
+            }
+            state.lastAggressorIndex = playerIdx;
+            addLog(player.name, `賭け金を上乗せしました (Raise: 合計 ${player.roundBet} チップ)`);
+            triggerBetChipEffect(playerIdx, actualBet);
+          }
+        }
+        
+        // オンライン対戦のホストの場合、ゲスト全員にアクション通知を送信
+        if (state.gameType === "online" && state.isHost) {
+          peerManager.send(null, {
+            type: "ACTION_EFFECT",
+            payload: { playerId, action, amount }
+          });
+        }
+        
+        checkRoundState();
+      }
+
+      function checkRoundState() {
+        const alivePlayers = state.players.filter(p => !p.isFolded);
+        if (alivePlayers.length === 1) {
+          handleDefaultWin(alivePlayers[0]);
+          return;
+        }
+        
+        // アクション可能な（チップが残っている）生存プレイヤー数をカウント
+        const activePlayersCount = alivePlayers.filter(p => p.chips > 0).length;
+        
+        // アクション可能なプレイヤーが1人以下（全員オールインなど）になった場合、
+        // これ以上ベットの掛け合いは発生しないため、即座に強制ショーダウンへ移行します。
+        if (activePlayersCount <= 1) {
+          debugLog("アクション可能な生存プレイヤーが1人以下になったため、即時ショーダウンへ移行します。");
+          handleShowdown();
+          return;
+        }
+        
+        // 全員がその周で少なくとも1回アクションを終え、かつベット額が揃っているか確認
+        const roundFinished = alivePlayers.every(p => {
+          if (p.chips <= 0) return true; // オールイン状態のプレイヤーは除外
+          return p.hasActedInRound && (p.roundBet === state.currentBet);
+        });
+        
+        if (roundFinished) {
+          if (state.betRound < 3) {
+            debugLog(`${state.betRound}周目が終了。次の周へ進みます。`);
+            startNewRound(state.betRound + 1);
+          } else {
+            debugLog("3周目を終えたため、強制ショーダウンへ移行します。");
+            handleShowdown();
+          }
+        } else {
+          moveToNextPlayer();
+        }
+      }
+
+      function moveToNextPlayer() {
+        if (!state.players || state.players.length === 0) return;
+        state.activePlayerIndex = (state.activePlayerIndex + 1) % state.players.length;
+        
+        if (state.gameType === "online") broadcastGameState();
+        else startTurn();
+      }
+
+      // 得点壺から勝者の座席へチップがジャラジャラ戻る演出
+      function triggerPotCollectEffect(playerIndex, amount) {
+        if (amount <= 0) return;
+        
+        const myIndex = state.players.findIndex(p => p.id === "me");
+        if (myIndex === -1) return;
+        
+        const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+        const relativeIdx = (playerIndex - myIndex + state.players.length) % state.players.length;
+        const seatId = seatAssignments[relativeIdx];
+        const seatEl = document.getElementById(seatId);
+        const potEl = document.querySelector(".pot-container");
+        
+        if (!seatEl || !potEl) return;
+        
+        const seatRect = seatEl.getBoundingClientRect();
+        const potRect = potEl.getBoundingClientRect();
+        
+        const startX = potRect.left + potRect.width / 2 + window.scrollX;
+        const startY = potRect.top + potRect.height / 2 + window.scrollY;
+        const endX = seatRect.left + seatRect.width / 2 + window.scrollX;
+        const endY = seatRect.top + seatRect.height / 2 + window.scrollY;
+        
+        // ポット回収時は5枚程度のチップを時間差でジャラジャラ飛ばす
+        const chipCount = Math.min(6, amount);
+        
+        for (let i = 0; i < chipCount; i++) {
+          setTimeout(() => {
+            const chip = document.createElement("div");
+            chip.style.position = "absolute";
+            chip.style.left = `${startX}px`;
+            chip.style.top = `${startY}px`;
+            chip.style.zIndex = "1000";
+            chip.style.pointerEvents = "none";
+            chip.style.display = "flex";
+            chip.style.alignItems = "center";
+            chip.style.gap = "5px";
+            chip.style.background = "rgba(18, 14, 12, 0.9)";
+            chip.style.border = "1px solid #d4af37";
+            chip.style.borderRadius = "12px";
+            chip.style.padding = "3px 8px";
+            chip.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), 0 0 8px rgba(212,175,55,0.4)";
+            
+            const coinDot = document.createElement("span");
+            coinDot.style.width = "10px";
+            coinDot.style.height = "10px";
+            coinDot.style.borderRadius = "50%";
+            coinDot.style.background = "radial-gradient(circle, #fbe695 30%, #d4af37 100%)";
+            
+            const txt = document.createElement("span");
+            txt.style.fontFamily = "var(--font-sans)";
+            txt.style.fontSize = "0.75rem";
+            txt.style.fontWeight = "bold";
+            txt.style.color = "#fbe695";
+            txt.textContent = `+${amount}`;
+            
+            chip.appendChild(coinDot);
+            chip.appendChild(txt);
+            document.body.appendChild(chip);
+            
+            const midX = (startX + endX) / 2;
+            const midY = Math.min(startY, endY) - 50 - (i * 10);
+            
+            const anim = chip.animate([
+              { left: `${startX}px`, top: `${startY}px`, transform: "scale(0.6) rotate(0deg)", opacity: 0.8 },
+              { left: `${midX}px`, top: `${midY}px`, transform: "scale(1.1) rotate(180deg)", opacity: 1 },
+              { left: `${endX}px`, top: `${endY}px`, transform: "scale(0.8) rotate(360deg)", opacity: 0.2 }
+            ], {
+              duration: 700,
+              easing: "cubic-bezier(0.25, 0.46, 0.45, 0.94)"
+            });
+            
+            anim.onfinish = () => {
+              chip.remove();
+            };
+          }, i * 100);
+        }
+      }
+
+      // プレイヤー間でお祝儀チップが直接移動する演出
+      function triggerGiftChipEffect(fromIdx, toIdx, amount) {
+        if (amount <= 0) return;
+        
+        const myIndex = state.players.findIndex(p => p.id === "me");
+        if (myIndex === -1) return;
+        
+        const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+        
+        // 元プレイヤーの座標取得
+        const fromRelativeIdx = (fromIdx - myIndex + state.players.length) % state.players.length;
+        const fromSeatId = seatAssignments[fromRelativeIdx];
+        const fromSeatEl = document.getElementById(fromSeatId);
+        
+        // 先プレイヤーの座標取得
+        const toRelativeIdx = (toIdx - myIndex + state.players.length) % state.players.length;
+        const toSeatId = seatAssignments[toRelativeIdx];
+        const toSeatEl = document.getElementById(toSeatId);
+        
+        if (!fromSeatEl || !toSeatEl) return;
+        
+        const fromRect = fromSeatEl.getBoundingClientRect();
+        const toRect = toSeatEl.getBoundingClientRect();
+        
+        const startX = fromRect.left + fromRect.width / 2 + window.scrollX;
+        const startY = fromRect.top + fromRect.height / 2 + window.scrollY;
+        const endX = toRect.left + toRect.width / 2 + window.scrollX;
+        const endY = toRect.top + toRect.height / 2 + window.scrollY;
+        
+        // 額に応じた枚数のコインを飛ばす（最大5枚に制限）
+        const coinCount = Math.min(5, Math.ceil(amount / 2));
+        
+        for (let i = 0; i < coinCount; i++) {
+          setTimeout(() => {
+            const chip = document.createElement("div");
+            chip.className = "coin-chip-effect";
+            chip.style.position = "absolute";
+            chip.style.left = `${startX}px`;
+            chip.style.top = `${startY}px`;
+            chip.style.width = "20px";
+            chip.style.height = "20px";
+            chip.style.background = "radial-gradient(circle, #ffd700 0%, #d4af37 60%, #b8860b 100%)";
+            chip.style.borderRadius = "50%";
+            chip.style.border = "1.5px solid #fff";
+            chip.style.boxShadow = "0 2px 4px rgba(0,0,0,0.5)";
+            chip.style.zIndex = "3000";
+            chip.style.pointerEvents = "none";
+            document.body.appendChild(chip);
+            
+            const midX = (startX + endX) / 2 + (Math.random() - 0.5) * 50;
+            const midY = Math.min(startY, endY) - 80 - (i * 15);
+            
+            const anim = chip.animate([
+              { left: `${startX}px`, top: `${startY}px`, transform: "scale(0.8) rotate(0deg)", opacity: 0.9 },
+              { left: `${midX}px`, top: `${midY}px`, transform: "scale(1.2) rotate(180deg)", opacity: 1 },
+              { left: `${endX}px`, top: `${endY}px`, transform: "scale(0.8) rotate(360deg)", opacity: 0.3 }
+            ], {
+              duration: 800,
+              easing: "cubic-bezier(0.25, 0.46, 0.45, 0.94)"
+            });
+            
+            anim.onfinish = () => {
+              chip.remove();
+            };
+          }, i * 150);
+        }
+      }
+
+      function handleDefaultWin(winner) {
+        debugLog(`不戦勝決定: 勝者 ${winner.name}`);
+        addLog(null, `${winner.name} 以外のプレイヤーが降参したため、不戦勝となりました！`, "log-system");
+        
+        const handEval = evaluateHand(winner.hand);
+        const is10_10 = winner.hand[0] === 10 && winner.hand[1] === 10;
+        const is1_1 = winner.hand[0] === 1 && winner.hand[1] === 1;
+        const isButa = handEval.type === HAND_TYPES.POINTS_0;
+        const winIdx = state.players.findIndex(p => p.id === winner.id);
+        
+        // 1. ポットの配分 (通常勝分)
+        const tsukiPot = state.pot;
+        winner.chips += tsukiPot;
+        triggerPotCollectEffect(winIdx, tsukiPot);
+        state.pot = 0;
+        
+        let giftDetails = "";
+        
+        // --- 10.10 十ゾロ不戦勝の場合 ---
+        if (is10_10) {
+          giftDetails = "【お祝儀】十ゾロ (10.10) 不戦勝！敗者全員から20チップずつ徴収します。";
+          state.players.forEach((p, idx) => {
+            if (p.id !== winner.id) {
+              const gift = Math.min(p.chips, 20);
+              p.chips -= gift;
+              winner.chips += gift;
+              // 敗者から勝者へチップ移動演出
+              triggerGiftChipEffect(idx, winIdx, gift);
+            }
+          });
+          
+          updateUI();
+          triggerTozoroEffect(winner.id, () => {
+            if (state.gameType === "online") {
+              broadcastShowdown([{
+                id: winner.id, name: winner.name, hand: winner.hand,
+                evaluatedName: handEval.name, isWinner: true
+              }], giftDetails, false);
+            } else {
+              updateUI();
+              showShowdownResult([{
+                id: winner.id, name: winner.name, hand: winner.hand,
+                evaluatedName: handEval.name, isWinner: true
+              }], giftDetails);
+            }
+          });
+          return;
+        }
+        
+        // --- 1.1 ピンゾロ不戦勝の場合 ---
+        if (is1_1) {
+          state.rouletteWinnerId = winner.id;
+          state.isDefaultWin = true; // 不戦勝フラグをセット
+          
+          updateUI();
+          setTimeout(() => {
+            if (state.gameType === "online") {
+              broadcastRouletteTrigger(winner.id);
+            } else {
+              triggerRoulette(winner.id);
+            }
+          }, 1000);
+          return;
+        }
+        
+        // --- 0点 ブタ不戦勝の場合 ---
+        if (isButa) {
+          giftDetails = "【お祝儀】0点（ブタ）ブラフ成功！他プレイヤーから3チップずつ徴収します。";
+          state.players.forEach((p, idx) => {
+            if (p.id !== winner.id) {
+              const gift = Math.min(p.chips, 3);
+              p.chips -= gift;
+              winner.chips += gift;
+              // 敗者から勝者へチップ移動演出
+              triggerGiftChipEffect(idx, winIdx, gift);
+            }
+          });
+        }
+        
+        // --- 通常またはブタの場合の特大バナー演出 ---
+        const banner = document.createElement("div");
+        banner.className = "showdown-banner";
+        banner.style.position = "absolute";
+        banner.style.top = "40%";
+        banner.style.left = "0";
+        banner.style.width = "100%";
+        banner.style.zIndex = "2000";
+        banner.style.textAlign = "center";
+        banner.style.background = "linear-gradient(90deg, transparent, rgba(184,28,34,0.95) 15%, rgba(184,28,34,0.95) 85%, transparent)";
+        banner.style.borderTop = "2px solid var(--color-gold)";
+        banner.style.borderBottom = "2px solid var(--color-gold)";
+        banner.style.padding = "20px 0";
+        banner.style.fontFamily = "var(--font-serif)";
+        banner.style.color = "var(--color-gold-light)";
+        banner.style.fontSize = "2rem";
+        banner.style.fontWeight = "bold";
+        banner.style.textShadow = "0 2px 5px rgba(0,0,0,0.8)";
+        banner.style.boxShadow = "0 10px 25px rgba(0,0,0,0.5)";
+        
+        if (winner.id === "me") {
+          banner.innerHTML = "勝負あり！ (相手全員降参)";
+        } else {
+          banner.innerHTML = `${winner.name} の不戦勝 (全員降参)`;
+        }
+        
+        document.getElementById("game-screen").appendChild(banner);
+        
+        banner.animate([
+          { transform: "scaleY(0) translateY(-20px)", opacity: 0 },
+          { transform: "scaleY(1) translateY(0)", opacity: 1 }
+        ], { duration: 400, easing: "ease-out" });
+        
+        // 勝者が自分なら紙吹雪
+        if (winner.id === "me") {
+          setTimeout(() => {
+            confetti({
+              particleCount: 80,
+              spread: 60,
+              origin: { y: 0.6 }
+            });
+          }, 200);
+        }
+        
+        setTimeout(() => {
+          banner.animate([
+            { transform: "scaleY(1)", opacity: 1 },
+            { transform: "scaleY(0)", opacity: 0 }
+          ], { duration: 300, easing: "ease-in" }).onfinish = () => {
+            banner.remove();
+          };
+          
+          updateUI();
+          
+          const playerResults = [{
+            id: winner.id, name: winner.name, hand: winner.hand,
+            evaluatedName: handEval.name + (isButa ? " (ブラフ成功!)" : ""), isWinner: true
+          }];
+          if (state.gameType === "online") {
+            broadcastShowdown(playerResults, giftDetails, false);
+          } else {
+            showShowdownResult(playerResults, giftDetails);
+          }
+        }, 2200);
+      }
+
+      function handleShowdown() {
+        debugLog("ショーダウン（勝敗判定）処理開始");
+        addLog(null, "--- 勝負 (ショーダウン) ---", "log-system");
+        const alivePlayers = state.players.filter(p => !p.isFolded);
+        const result = determineWinners(alivePlayers);
+        
+        // ツキ (同点延長サドンデス) 判定：勝者(最高得点)が複数いる場合
+        if (result.winners.length >= 2) {
+          if (state.gameType === "online") {
+            if (state.isHost) startTsuki(state.players);
+          } else {
+            startTsuki(state.players);
+          }
+          return;
+        }
+        
+        // ポットの配分
+        const winnerChips = Math.floor(state.pot / result.winners.length);
+        const potAmount = state.pot;
+        
+        result.winners.forEach(winnerId => {
+          const winIdx = state.players.findIndex(p => p.id === winnerId);
+          if (winIdx !== -1) {
+            triggerPotCollectEffect(winIdx, potAmount / result.winners.length);
+          }
+        });
+        
+        state.players.forEach(p => {
+          if (result.winners.includes(p.id)) p.chips += winnerChips;
+        });
+        
+        // ポットクリア（手元へ配分完了のため）
+        state.pot = 0;
+
+        let giftDetails = "";
+        const is10_10Winner = result.players.some(p => p.isWinner && p.hand[0] === 10 && p.hand[1] === 10 && !result.killerTriggered);
+        const is1_1Winner = result.players.some(p => p.isWinner && p.hand[0] === 1 && p.hand[1] === 1);
+
+        // 十ゾロ(10.10)祝儀
+        if (is10_10Winner) {
+          const winPlayer = result.players.find(wp => wp.hand[0] === 10 && wp.hand[1] === 10);
+          const winIdx = state.players.findIndex(p => p.id === winPlayer.id);
+          giftDetails = "【お祝儀】十ゾロ (10.10) 勝利！敗者全員から20チップずつ徴収します。";
+          state.players.forEach((p, idx) => {
+            if (!result.winners.includes(p.id)) {
+              const gift = Math.min(p.chips, 20);
+              p.chips -= gift;
+              if (winPlayer) {
+                const lp = state.players.find(wp => wp.id === winPlayer.id);
+                if (lp) lp.chips += gift;
+              }
+              // 敗者から勝者へチップ移動演出
+              triggerGiftChipEffect(idx, winIdx, gift);
+            }
+          });
+          
+          triggerTozoroEffect(winPlayer.id, () => {
+            if (state.gameType === "online") {
+              broadcastShowdown(result.players, giftDetails, false);
+            } else {
+              updateUI();
+              showShowdownResult(result.players, giftDetails);
+            }
+          });
+          return;
+        }
+
+        // ピンゾロ(1.1)祝儀（ルーレット起動）
+        if (is1_1Winner) {
+          const winner1_1 = result.players.find(p => p.isWinner && p.hand[0] === 1 && p.hand[1] === 1);
+          state.rouletteWinnerId = winner1_1.id;
+          
+          if (state.gameType === "online") {
+            broadcastRouletteTrigger(winner1_1.id);
+          } else {
+            triggerRoulette(winner1_1.id);
+          }
+          return;
+        }
+
+        if (result.killerTriggered) giftDetails += "【特殊】10.10キラー (1.2) が十ゾロ (10.10) を撃破しました！";
+
+        if (state.gameType === "online") broadcastShowdown(result.players, giftDetails, false);
+        else {
+          updateUI();
+          showShowdownResult(result.players, giftDetails);
+        }
+      }
+
+      function triggerTozoroEffect(winnerId, callback) {
+        const winner = state.players.find(p => p.id === winnerId);
+        if (!winner) {
+          if (callback) callback();
+          return;
+        }
+        
+        addLog(null, `★★★ 十ゾロ (10.10) 降臨！ ${winner.name} に全員からお祝儀20チップ！ ★★★`, "log-highlight");
+        
+        const banner = document.createElement("div");
+        banner.id = "tozoro-banner";
+        banner.innerHTML = `<div class="tozoro-title">十ゾロ降臨</div><div class="tozoro-subtitle">全員から祝儀 20 チップ徴収！</div>`;
+        document.body.appendChild(banner);
+        
+        // 金色の紙吹雪を2.5秒間乱舞
+        const end = Date.now() + (2.5 * 1000);
+        const colors = ["#d4af37", "#f3e5ab", "#ffffff", "#b81c22"];
+        
+        (function frame() {
+          confetti({ particleCount: 6, angle: 60, spread: 55, origin: { x: 0 }, colors });
+          confetti({ particleCount: 6, angle: 120, spread: 55, origin: { x: 1 }, colors });
+          if (Date.now() < end) {
+            requestAnimationFrame(frame);
+          }
+        }());
+
+        setTimeout(() => { banner.classList.add("show"); }, 50);
+        
+        // 敗者全員から勝者の座席へ、大量のチップが飛ぶエフェクト（3連打）
+        const winnerIdx = state.players.findIndex(p => p.id === winner.id);
+        
+        state.players.forEach((p, idx) => {
+          if (p.id !== winner.id) {
+            for (let i = 0; i < 3; i++) {
+              setTimeout(() => {
+                triggerBetChipEffect(idx, 7); // 敗者から中央へ
+                setTimeout(() => {
+                  triggerPotCollectEffect(winnerIdx, 7); // 中央から勝者へ
+                }, 400);
+              }, i * 300);
+            }
+          }
+        });
+
+        setTimeout(() => {
+          banner.classList.remove("show");
+          setTimeout(() => {
+            banner.remove();
+            if (callback) callback();
+          }, 500);
+        }, 2500);
+      }
+
+      function startTsuki(tsukiPlayers) {
+        state.isTsuki = true;
+        addLog(null, "★★★ 同点につき「ツキ (延長戦)」が発生！ ★★★", "log-highlight");
+        
+        // 全プレイヤーのフォールド状態を強制解除し、ツキに全員復帰させる！
+        state.players.forEach(p => {
+          p.isFolded = false;
+        });
+        
+        if (state.gameType === "online" && state.isHost) {
+          broadcastGameState();
+        } else {
+          updateUI();
+        }
+        
+        // ツキ開始バナーを表示
+        const banner = document.createElement("div");
+        banner.id = "tsuki-banner";
+        banner.innerHTML = "同点引き分け！<br>ツキ（延長戦）開始！";
+        document.body.appendChild(banner);
+        
+        setTimeout(() => { banner.classList.add("show"); }, 50);
+        
+        setTimeout(() => {
+          banner.classList.remove("show");
+          setTimeout(() => banner.remove(), 500);
+          
+          // ツキの配札ループを開始
+          runTsukiRound(tsukiPlayers);
+        }, 2200);
+      }
+
+      function runTsukiRound(tsukiPlayers) {
+        debugLog("ツキ配札実行中...");
+        addLog(null, "ツキ：山札をシャッフルして配札中...", "log-system");
+        
+        // 山札リセット＆シャッフル
+        state.deck = shuffle(generateDeck());
+        
+        // 全員の手札をクリア（UIから古いカードを除去）
+        tsukiPlayers.forEach(p => { p.hand = []; });
+        updateUI();
+        
+        // 1枚ずつ順番にアニメーション付きで配る
+        const dealSequence = [];
+        // 1周目: 各プレイヤーに1枚ずつ
+        tsukiPlayers.forEach((p, i) => dealSequence.push({ player: p, cardIdx: 0, seqIdx: i }));
+        // 2周目: 各プレイヤーに2枚目
+        tsukiPlayers.forEach((p, i) => dealSequence.push({ player: p, cardIdx: 1, seqIdx: tsukiPlayers.length + i }));
+        
+        // 全員分のカードを先に引いておく
+        const drawnCards = {};
+        tsukiPlayers.forEach(p => {
+          drawnCards[p.id] = [state.deck.pop(), state.deck.pop()];
+        });
+
+        if (state.gameType === "online" && state.isHost) {
+          peerManager.send(null, {
+            type: "TSUKI_ROUND_START",
+            payload: {
+              isTsuki: true,
+              drawnCards,
+              deckCount: state.deck.length
+            }
+          });
+        }
+        
+        const dealDelay = 600; // 1枚あたり600ms（ワクワク感を演出するためにゆっくり）
+        
+        dealSequence.forEach((item, seqIdx) => {
+          setTimeout(() => {
+            const p = item.player;
+            if (!p.hand) p.hand = [];
+            p.hand.push(drawnCards[p.id][item.cardIdx]);
+            
+            // ツキではすべてのプレイヤーのカードを表向きで配る
+            const myIndex = state.players.findIndex(pl => pl.id === "me");
+            const playerIdx = state.players.findIndex(pl => pl.id === p.id);
+            const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+            const relativeIdx = (playerIdx - myIndex + state.players.length) % state.players.length;
+            const seatId = seatAssignments[relativeIdx];
+            const seatEl = document.getElementById(seatId);
+            
+            if (seatEl) {
+              const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
+              const cardsEl = document.getElementById(`cards-player${playerNum}`);
+              const cardValue = drawnCards[p.id][item.cardIdx];
+              
+              if (cardsEl) {
+                if (p.id === "me") {
+                  // 自分のカードは大きいサイズで表向き表示
+                  const cardHtml = renderCardHtml(cardValue, true);
+                  const tempDiv = document.createElement("div");
+                  tempDiv.innerHTML = cardHtml;
+                  const cardEl = tempDiv.firstElementChild;
+                  cardEl.style.opacity = "0";
+                  cardEl.style.transform = "translateY(-25px) scale(0.7)";
+                  cardEl.style.transition = "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)";
+                  
+                  gameElems.myHandContainer.appendChild(cardEl);
+                  
+                  cardEl.offsetHeight;
+                  cardEl.style.opacity = "1";
+                  cardEl.style.transform = "translateY(0) scale(1)";
+                } else {
+                  // 他プレイヤーのカードもミニサイズで表向き表示（ツキ限定）
+                  const cardHtml = renderCardHtml(cardValue, false);
+                  const tempDiv = document.createElement("div");
+                  tempDiv.innerHTML = cardHtml;
+                  const cardEl = tempDiv.firstElementChild;
+                  cardEl.style.opacity = "0";
+                  cardEl.style.transform = "translateY(-20px) scale(0.7)";
+                  cardEl.style.transition = "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)";
+                  cardsEl.appendChild(cardEl);
+                  
+                  cardEl.offsetHeight;
+                  cardEl.style.opacity = "1";
+                  cardEl.style.transform = "translateY(0) scale(1)";
+                }
+              }
+            }
+          }, seqIdx * dealDelay);
+        });
+        
+        // 全員への配札完了後の処理
+        const totalDealTime = dealSequence.length * dealDelay + 500;
+        
+        setTimeout(() => {
+          // 手札を正式にセット
+          tsukiPlayers.forEach(p => {
+            p.hand = drawnCards[p.id];
+          });
+          
+          // 役（シッピン以上）の判定
+          const evaluated = tsukiPlayers.map(p => {
+            const hasValidHand = p.hand && p.hand.length === 2 && p.hand.every(c => c !== undefined && c !== null);
+            const evalResult = hasValidHand ? Evaluator.evaluateHand(p.hand) : { type: 0, name: "手札なし" };
+            const isYaku = hasValidHand && (evalResult.type >= Evaluator.HAND_TYPES.SHIPPIN);
+            return { player: p, evalResult, isYaku };
+          });
+          
+          const yakuPlayers = evaluated.filter(e => e.isYaku);
+          
+          // 各プレイヤーの手札をログに表示
+          evaluated.forEach(e => {
+            addLog(e.player.name, `手札: ${e.evalResult.name} ${e.isYaku ? "★役あり！" : "(役なし)"}`);
+          });
+          
+          if (yakuPlayers.length === 0) {
+            // 役なし → カード回収演出の後に再配札
+            addLog(null, "ツキ：役が出ませんでした。カードを回収して配り直します...", "log-system");
+            
+            if (state.gameType === "online" && state.isHost) {
+              peerManager.send(null, { type: "TSUKI_RETRY" });
+            }
+            
+            // 全座席のカードを中央へ吸い込む回収演出
+            tsukiPlayers.forEach((p, pIdx) => {
+              const playerIdx = state.players.findIndex(pl => pl.id === p.id);
+              triggerFoldCardEffect(playerIdx);
+            });
+            
+            setTimeout(() => {
+              // 手札クリア＆自分の大きいカード表示もクリア
+              tsukiPlayers.forEach(p => { p.hand = []; });
+              gameElems.myHandContainer.innerHTML = "";
+              
+              // 他プレイヤーのミニカード表示もクリア
+              const myIndex = state.players.findIndex(pl => pl.id === "me");
+              const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+              state.players.forEach((p, idx) => {
+                if (p.id === "me") return;
+                const relativeIdx = (idx - myIndex + state.players.length) % state.players.length;
+                const seatId = seatAssignments[relativeIdx];
+                const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
+                const cardsEl = document.getElementById(`cards-player${playerNum}`);
+                if (cardsEl) cardsEl.innerHTML = "";
+              });
+              
+              updateUI();
+              
+              // 少し間を置いてから再配札
+              setTimeout(() => {
+                runTsukiRound(tsukiPlayers);
+              }, 800);
+            }, 800);
+          } else {
+            // 役が出た！
+            let maxScore = -1;
+            yakuPlayers.forEach(y => {
+              if (y.evalResult.type > maxScore) maxScore = y.evalResult.type;
+            });
+            
+            const winners = yakuPlayers.filter(y => y.evalResult.type === maxScore);
+            
+            if (winners.length >= 2) {
+              addLog(null, "ツキ：最強役が同点です。カードを回収して配り直します...", "log-system");
+              
+              if (state.gameType === "online" && state.isHost) {
+                peerManager.send(null, { type: "TSUKI_TIE" });
+              }
+              
+              tsukiPlayers.forEach((p, pIdx) => {
+                const playerIdx = state.players.findIndex(pl => pl.id === p.id);
+                triggerFoldCardEffect(playerIdx);
+              });
+              
+              setTimeout(() => {
+                tsukiPlayers.forEach(p => { p.hand = []; });
+                gameElems.myHandContainer.innerHTML = "";
+                const myIndex = state.players.findIndex(pl => pl.id === "me");
+                const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+                state.players.forEach((p, idx) => {
+                  if (p.id === "me") return;
+                  const relativeIdx = (idx - myIndex + state.players.length) % state.players.length;
+                  const seatId = seatAssignments[relativeIdx];
+                  const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
+                  const cardsEl = document.getElementById(`cards-player${playerNum}`);
+                  if (cardsEl) cardsEl.innerHTML = "";
+                });
+                updateUI();
+                setTimeout(() => { runTsukiRound(tsukiPlayers); }, 800);
+              }, 800);
+            } else {
+              // 単独勝者確定！
+              const winObj = winners[0];
+              const winner = winObj.player;
+              const yakuName = winObj.evalResult.name;
+              
+              addLog(null, `★★★ ツキ決着！ ${winner.name} が役【${yakuName}】で勝利！ ★★★`, "log-highlight");
+              
+              // ポットの全チップを獲得
+              const tsukiPot = state.pot;
+              winner.chips += tsukiPot;
+              
+              const winnerIdx = state.players.findIndex(p => p.id === winner.id);
+              triggerPotCollectEffect(winnerIdx, tsukiPot);
+              state.pot = 0;
+              
+              // --- お祝儀システムの発動 ---
+              let giftText = `【ツキ】同点引き分けによる延長サドンデス戦！${winner.name} が役【${yakuName}】を引いて保留ポットの全 ${tsukiPot} チップを獲得しました！`;
+              
+              const is10_10 = winner.hand[0] === 10 && winner.hand[1] === 10;
+              const is1_1 = winner.hand[0] === 1 && winner.hand[1] === 1;
+              
+              // 十ゾロ(10.10)祝儀: 全員から20チップ
+              if (is10_10) {
+                giftText += "\n【お祝儀】十ゾロ (10.10) 勝利！敗者全員から20チップずつ徴収します。";
+                state.players.forEach((p, idx) => {
+                  if (p.id !== winner.id) {
+                    const gift = Math.min(p.chips, 20);
+                    p.chips -= gift;
+                    winner.chips += gift;
+                    // 敗者から勝者へチップ移動演出
+                    triggerGiftChipEffect(idx, winnerIdx, gift);
+                  }
+                });
+                
+                updateUI();
+                triggerTozoroEffect(winner.id, () => {
+                  finalizeTsukiResult(winner, yakuName, tsukiPot, giftText);
+                });
+                return;
+              }
+              
+              // ピンゾロ(1.1)祝儀: ルーレット起動
+              if (is1_1) {
+                giftText += "\n【お祝儀】ピンピン (1.1) 勝利！ルーレットが発動します。";
+                state.rouletteWinnerId = winner.id;
+                state.tsukiGiftText = giftText;
+                state.tsukiResults = buildTsukiResults(winner);
+                
+                if (state.gameType === "online") {
+                  broadcastRouletteTrigger(winner.id);
+                } else {
+                  triggerRoulette(winner.id);
+                }
+                return;
+              }
+              
+              // 通常のお祝儀なし
+              updateUI();
+              setTimeout(() => {
+                finalizeTsukiResult(winner, yakuName, tsukiPot, giftText);
+              }, 1500);
+            }
+          }
+        }, totalDealTime);
+      }
+
+      function runClientTsukiRound(drawnCards) {
+        debugLog("ゲスト側ツキ配札アニメーション開始");
+        
+        // 全員の手札をクリア
+        state.players.forEach(p => { p.hand = []; });
+        updateUI();
+        
+        const dealSequence = [];
+        state.players.forEach((p, i) => dealSequence.push({ player: p, cardIdx: 0, seqIdx: i }));
+        state.players.forEach((p, i) => dealSequence.push({ player: p, cardIdx: 1, seqIdx: state.players.length + i }));
+        
+        const dealDelay = 600;
+        
+        dealSequence.forEach((item, seqIdx) => {
+          setTimeout(() => {
+            const p = item.player;
+            if (!p.hand) p.hand = [];
+            
+            const cardValue = drawnCards[p.id][item.cardIdx];
+            p.hand.push(cardValue);
+            
+            const myIndex = state.players.findIndex(pl => pl.id === "me");
+            const playerIdx = state.players.findIndex(pl => pl.id === p.id);
+            const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+            const relativeIdx = (playerIdx - myIndex + state.players.length) % state.players.length;
+            const seatId = seatAssignments[relativeIdx];
+            const seatEl = document.getElementById(seatId);
+            
+            if (seatEl) {
+              const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
+              const cardsEl = document.getElementById(`cards-player${playerNum}`);
+              
+              if (cardsEl) {
+                if (p.id === "me") {
+                  const cardHtml = renderCardHtml(cardValue, true);
+                  const tempDiv = document.createElement("div");
+                  tempDiv.innerHTML = cardHtml;
+                  const cardEl = tempDiv.firstElementChild;
+                  cardEl.style.opacity = "0";
+                  cardEl.style.transform = "translateY(-25px) scale(0.7)";
+                  cardEl.style.transition = "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)";
+                  gameElems.myHandContainer.appendChild(cardEl);
+                  cardEl.offsetHeight;
+                  cardEl.style.opacity = "1";
+                  cardEl.style.transform = "translateY(0) scale(1)";
+                } else {
+                  const cardHtml = renderCardHtml(cardValue, false);
+                  const tempDiv = document.createElement("div");
+                  tempDiv.innerHTML = cardHtml;
+                  const cardEl = tempDiv.firstElementChild;
+                  cardEl.style.opacity = "0";
+                  cardEl.style.transform = "translateY(-20px) scale(0.7)";
+                  cardEl.style.transition = "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)";
+                  cardsEl.appendChild(cardEl);
+                  cardEl.offsetHeight;
+                  cardEl.style.opacity = "1";
+                  cardEl.style.transform = "translateY(0) scale(1)";
+                }
+              }
+            }
+          }, seqIdx * dealDelay);
+        });
+        
+        const totalDealTime = dealSequence.length * dealDelay + 500;
+        setTimeout(() => {
+          // 手札を正式にセット
+          state.players.forEach(p => {
+            p.hand = drawnCards[p.id];
+          });
+          
+          // 役の判定ログ表示（ゲスト側でも出す）
+          state.players.forEach(p => {
+            const hasValidHand = p.hand && p.hand.length === 2;
+            const evalResult = hasValidHand ? Evaluator.evaluateHand(p.hand) : { type: 0, name: "手札なし" };
+            const isYaku = hasValidHand && (evalResult.type >= Evaluator.HAND_TYPES.SHIPPIN);
+            addLog(p.name, `手札: ${evalResult.name} ${isYaku ? "★役あり！" : "(役なし)"}`);
+          });
+          
+          updateUI();
+        }, totalDealTime);
+      }
+
+      function clearAllPlayerMiniCards() {
+        const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+        const myIndex = state.players.findIndex(pl => pl.id === "me");
+        if (myIndex === -1) return;
+        state.players.forEach((p, idx) => {
+          if (p.id === "me") return;
+          const relativeIdx = (idx - myIndex + state.players.length) % state.players.length;
+          const seatId = seatAssignments[relativeIdx];
+          const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
+          const cardsEl = document.getElementById(`cards-player${playerNum}`);
+          if (cardsEl) cardsEl.innerHTML = "";
+        });
+      }
+
+      function buildTsukiResults(winner) {
+        return state.players.map(p => {
+          const isWinner = p.id === winner.id;
+          const hasValidHand = p.hand && p.hand.length === 2 && p.hand.every(c => c !== undefined && c !== null);
+          const evalResult = hasValidHand ? Evaluator.evaluateHand(p.hand) : { type: 0, name: "手札なし" };
+          return {
+            id: p.id, name: p.name, hand: p.hand,
+            evaluatedName: isWinner ? evalResult.name : "役なし (ツキ敗退)",
+            score: isWinner ? evalResult.type : 0,
+            isWinner: isWinner
+          };
+        });
+      }
+
+      function finalizeTsukiResult(winner, yakuName, tsukiPot, giftText) {
+        const tsukiResults = buildTsukiResults(winner);
+        
+        if (state.gameType === "online") {
+          broadcastShowdown(tsukiResults, giftText, false);
+        } else {
+          state.pot = 0;
+          updateUI();
+          showShowdownResult(tsukiResults, giftText);
+        }
+      }
+
+      function showShowdownResult(playerResults, giftText) {
+        debugLog("ショーダウン結果表示ダイアログ起動");
+        modals.roulette.style.display = "none";
+        const myResult = playerResults.find(pr => pr.id === "me");
+        const isMeWinner = myResult && myResult.isWinner;
+        if (isMeWinner) {
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ["#d4af37", "#b81c22", "#faf5eb"] });
+        }
+
+        modals.showdownPlayers.innerHTML = "";
+        playerResults.forEach(pr => {
+          const playerState = state.players.find(p => p.id === pr.id);
+          const isPlayerFolded = playerState ? playerState.isFolded : false;
+          // 降参したプレイヤーの手札は裏向き(非開示)にする
+          const cardHtml = isPlayerFolded 
+            ? `<div class="kabu-card card-back mini-card" style="width:30px; height:45px; border-radius:3px; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div><div class="kabu-card card-back mini-card" style="width:30px; height:45px; border-radius:3px; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>`
+            : pr.hand.map(c => renderCardHtml(c, false)).join("");
+          const isFoldedText = isPlayerFolded ? " (降参)" : "";
+          modals.showdownPlayers.innerHTML += `
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 10px;">
+              <div style="text-align: left;">
+                <span style="font-family: var(--font-serif); font-weight: bold; font-size: 1.1rem; ${pr.isWinner ? 'color: var(--color-gold-light);' : ''}">
+                  ${pr.name} ${pr.isWinner ? '🏆' : ''}
+                </span>
+                <div style="font-size: 0.8rem; color: var(--color-muted); margin-top: 3px;">役: ${pr.evaluatedName}${isFoldedText}</div>
+              </div>
+              <div style="display: flex; gap: 5px;">${cardHtml}</div>
+            </div>`;
+        });
+
+        const winnerNames = playerResults.filter(pr => pr.isWinner).map(pr => pr.name).join(", ");
+        modals.showdownBanner.textContent = `勝者: ${winnerNames}`;
+        modals.showdownCelebration.innerHTML = giftText || "";
+
+        if (state.gameType === "online" && !state.isHost) {
+          modals.btnNextHand.style.display = "none";
+          addLog(null, "ホストが次の局を開始するのをお待ちください...", "log-muted");
+        } else {
+          modals.btnNextHand.style.display = "block";
+        }
+        modals.showdown.style.display = "flex";
+      }
+
+      function startNextHand() {
+        modals.showdown.style.display = "none";
+        state.isTsuki = false;
+        state.players = state.players.filter(p => !p.isDisconnected);
+        
+        // いずれかのプレイヤーのチップが0以下の場合は破産（ハコ割れ）のため対戦終了
+        const bankruptPlayer = state.players.find(p => p.chips <= 0);
+        if (bankruptPlayer) {
+          alert(`【対戦終了】\n${bankruptPlayer.name}のチップがなくなりました（破産）。\nゲームを終了し、ロビーに戻ります。`);
+          exitToLobby();
+          return;
+        }
+        
+        state.mode = "pregame"; // 次の局に行く前にも一旦 pregame に戻して「局を開始する」ボタンを踏ませる
+        
+        // 全員のパラメータを一旦リセット
+        state.players.forEach(p => {
+          p.hand = [];
+          p.roundBet = 0;
+          p.totalBet = 0;
+          p.isFolded = false;
+        });
+        state.pot = 0;
+        
+        // 画面上のカード表示を全てクリア（ツキの表向きカードが残るバグ対策）
+        gameElems.myHandContainer.innerHTML = "";
+        const myIdx = state.players.findIndex(p => p.id === "me");
+        if (myIdx !== -1) {
+          const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+          state.players.forEach((p, idx) => {
+            const relativeIdx = (idx - myIdx + state.players.length) % state.players.length;
+            const seatId = seatAssignments[relativeIdx];
+            const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
+            const cardsEl = document.getElementById(`cards-player${playerNum}`);
+            if (cardsEl) cardsEl.innerHTML = "";
+          });
+        }
+        
+        if (state.gameType === "online") {
+          if (state.isHost) {
+            state.dealerIndex = (state.dealerIndex + 1) % state.players.length;
+            broadcastGameState(); // ゲスト側に pregame 状態を同期
+          }
+        } else {
+          state.dealerIndex = (state.dealerIndex + 1) % state.players.length;
+          updateUI();
+        }
+      }
+
+      // --- ルーレット ---
+      const rouletteSlices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      function initRouletteWheel() {
+        const wheel = modals.rouletteWheel;
+        if (!wheel) return;
+        wheel.innerHTML = "";
+        const anglePerSlice = 360 / rouletteSlices.length;
+        rouletteSlices.forEach((num, idx) => {
+          const rotation = idx * anglePerSlice;
+          const slice = document.createElement("div");
+          slice.className = "roulette-number-slice";
+          slice.style.transform = `rotate(${rotation}deg)`;
+          slice.textContent = getKanjiNumber(num);
+          wheel.appendChild(slice);
+
+          const divider = document.createElement("div");
+          divider.className = "roulette-divider";
+          divider.style.transform = `rotate(${rotation + anglePerSlice / 2}deg)`;
+          wheel.appendChild(divider);
+        });
+      }
+
+      function triggerRoulette(winnerId) {
+        const winner = state.players.find(p => p.id === winnerId);
+        if (!winner) {
+          debugLog(`警告: triggerRoulette で勝者が見つかりません (winnerId: ${winnerId})`);
+          return;
+        }
+        modals.rouletteWinner.textContent = winner.name;
+        modals.rouletteResultText.style.display = "none";
+        modals.btnCloseRoulette.style.display = "none";
+        modals.rouletteWheel.style.transition = "none";
+        modals.rouletteWheel.style.transform = "rotate(0deg)";
+        if (state.gameType === "online" && !state.isHost) {
+          modals.btnSpin.style.display = "none";
+        } else {
+          modals.btnSpin.style.display = "block";
+          modals.btnSpin.classList.remove("btn-disabled");
+        }
+        modals.roulette.style.display = "flex";
+      }
+
+      function spinRouletteWheel() {
+        if (state.gameType === "online" && !state.isHost) return;
+        modals.btnSpin.classList.add("btn-disabled");
+        
+        // 山札から引くのではなく、1〜10の出目を完全にランダム（均等確率）で決定
+        const rolledValue = Math.floor(Math.random() * 10) + 1;
+        state.rouletteCardValue = rolledValue;
+
+        const targetIndex = rouletteSlices.indexOf(rolledValue);
+        const anglePerSlice = 360 / rouletteSlices.length;
+        const spins = 5;
+        const targetAngle = 360 * spins - (targetIndex * anglePerSlice);
+
+        modals.rouletteWheel.style.transition = "transform 4s cubic-bezier(0.15, 0.85, 0.35, 1)";
+        modals.rouletteWheel.style.transform = `rotate(${targetAngle}deg)`;
+
+        if (state.gameType === "online") {
+          peerManager.send(null, { type: "ROULETTE_SPIN", payload: { angle: targetAngle, result: rolledValue } });
+        }
+        setTimeout(() => { showRouletteResult(rolledValue); }, 4200);
+      }
+
+      function showRouletteResult(value) {
+        const winnerIdx = state.players.findIndex(p => p.id === state.rouletteWinnerId);
+        const winner = state.players[winnerIdx];
+        if (!winner) return;
+        
+        const cost = value * 3;
+        
+        // 全員から勝者へチップが飛ぶエフェクトと加算減算
+        state.players.forEach((p, idx) => {
+          if (p.id !== winner.id) {
+            const gift = Math.min(p.chips, cost);
+            p.chips -= gift;
+            winner.chips += gift;
+            
+            // 敗者から勝者へ直接チップを飛ばすモーション
+            triggerGiftChipEffect(idx, winnerIdx, gift);
+          }
+        });
+        
+        state.rouletteCardValue = value; // 最終ダイアログ用に記録
+        
+        setTimeout(() => {
+          updateUI();
+        }, 1200);
+
+        modals.rouletteResultText.textContent = `結果: 【${value}】引いた！全員から ${cost} チップ獲得！`;
+        modals.rouletteResultText.style.display = "block";
+        confetti({ particleCount: 50, angle: 60, spread: 55, origin: { x: 0 } });
+        confetti({ particleCount: 50, angle: 120, spread: 55, origin: { x: 1 } });
+
+        if (state.gameType !== "online" || state.isHost) {
+          modals.btnCloseRoulette.style.display = "block";
+        }
+      }
+
+      function closeRouletteAndProceed() {
+        modals.roulette.style.display = "none";
+        
+        let finalResults;
+        let finalGiftText;
+        const cost = state.rouletteCardValue * 3;
+        
+        if (state.isTsuki && state.tsukiResults) {
+          finalResults = state.tsukiResults;
+          finalGiftText = `${state.tsukiGiftText}\n【お祝儀】結果【${state.rouletteCardValue}】により、敗者全員から ${cost} チップずつ徴収しました。`;
+          state.tsukiResults = null;
+          state.tsukiGiftText = null;
+        } else {
+          const alivePlayers = state.players.filter(p => !p.isFolded);
+          const result = determineWinners(alivePlayers);
+          finalResults = result.players;
+          finalGiftText = `【お祝儀】ピンゾロ (1.1) 勝利ルーレット：結果【${state.rouletteCardValue}】により、敗者全員から ${cost} チップずつ徴収しました。`;
+        }
+
+        if (state.gameType === "online") {
+          state.pot = 0;
+          broadcastShowdown(finalResults, finalGiftText, false);
+        } else {
+          state.pot = 0;
+          updateUI();
+          showShowdownResult(finalResults, finalGiftText);
+        }
+      }
+
+      // --- CPU対戦モード起動 ---
+      function startCpuMode() {
+        debugLog("🤖 CPU対戦（練習）開始ボタンが押されました。配札前の準備を行います。");
+        state.gameType = "cpu";
+        state.isHost = true;
+        state.mode = "pregame"; // 配札前の待機状態
+        state.players = [
+          { id: "me", name: state.myName, chips: INITIAL_CHIPS, hand: [], roundBet: 0, totalBet: 0, isFolded: false, isCpu: false, isHost: true },
+          { id: "cpu1", name: "源氏 (CPU)", chips: INITIAL_CHIPS, hand: [], roundBet: 0, totalBet: 0, isFolded: false, isCpu: true, aggression: 0.4 },
+          { id: "cpu2", name: "平家 (CPU)", chips: INITIAL_CHIPS, hand: [], roundBet: 0, totalBet: 0, isFolded: false, isCpu: true, aggression: 0.7 },
+          { id: "cpu3", name: "藤原 (CPU)", chips: INITIAL_CHIPS, hand: [], roundBet: 0, totalBet: 0, isFolded: false, isCpu: true, aggression: 0.2 }
+        ];
+        state.dealerIndex = 0;
+        state.pot = 0;
+        state.currentBet = 0;
+        state.betRound = 1;
+        
+        showScreen("game");
+        updateUI(); // 画面を更新し、持ち点100の状態にする
+        addLog(null, "CPU対戦の準備完了。各プレイヤーの持ち点は100チップです。「局を開始する」を押してください。", "log-system");
+      }
+
+      // --- オンライン対戦 (P2P) ---
+      function createOnlineRoom() {
+        if (!window.Peer) {
+          alert("通信ライブラリ (PeerJS) の読み込みに失敗したか、オフライン状態です。\nオンライン対戦はご利用いただけません。CPU対戦をお試しください。");
+          return;
+        }
+        state.gameType = "online";
+        state.isHost = true;
+        addLog("ロビー", "合言葉を取得中...");
+        peerManager = new PeerManager({
+          onIdReady: (id) => {
+            state.roomCode = id;
+            waitingElems.code.textContent = id;
+            state.players = [{
+              id: "me", peerId: id, name: state.myName, chips: INITIAL_CHIPS, hand: [],
+              roundBet: 0, totalBet: 0, isFolded: false, isCpu: false, isHost: true
+            }];
+            updateWaitingRoomUI();
+            showScreen("waiting");
+          },
+          onConnectionChange: (peerId, status) => {
+            if (status === "connected") {
+              addLog("ロビー", `${peerId} が接続しました`);
+            } else {
+              addLog("ロビー", `${peerId} が切断しました`);
+              if (state.mode === "game") {
+                const p = state.players.find(pl => pl.peerId === peerId);
+                if (p) {
+                  p.isFolded = true;
+                  p.isDisconnected = true;
+                  addLog(p.name, "接続が切れたため、降参扱いとします。", "log-danger");
+                  checkRoundState();
+                }
+              } else {
+                state.players = state.players.filter(p => p.peerId !== peerId);
+                updateWaitingRoomUI();
+              }
+            }
+          },
+          onMessage: (peerId, message) => { handleOnlineMessage(peerId, message); }
+        });
+        peerManager.initHost();
+      }
+
+      function joinOnlineRoom() {
+        if (!window.Peer) {
+          alert("通信ライブラリ (PeerJS) の読み込みに失敗したか、オフライン状態です。\nオンライン対戦はご利用いただけません。CPU対戦をお試しください。");
+          return;
+        }
+        const code = lobbyInputs.joinCode.value.trim();
+        if (!code) { alert("合言葉を入力してください"); return; }
+        state.gameType = "online";
+        state.isHost = false;
+        state.roomCode = code;
+        addLog("ロビー", "ホストに接続中...");
+        peerManager = new PeerManager({
+          onIdReady: (id) => { state.myId = id; },
+          onConnectionChange: (peerId, status) => {
+            if (status === "connected") {
+              addLog("ロビー", "ホストに接続しました！接続申請を送信中...");
+              peerManager.send(null, { type: "JOIN", payload: { name: state.myName } });
+              showScreen("waiting");
+            } else {
+              addLog("ロビー", "ホストとの接続が切れました。");
+              exitToLobby();
+            }
+          },
+          onMessage: (peerId, message) => { handleOnlineMessage(peerId, message); }
+        });
+        peerManager.initClient(code);
+      }
+
+      function leaveWaitingRoom() {
+        if (peerManager) peerManager.cleanup();
+        exitToLobby();
+      }
+
+      function startOnlineGame() {
+        if (!state.isHost || state.players.length < 2) return;
+        state.dealerIndex = 0;
+        state.mode = "pregame"; // 配札前の待機状態
+        
+        // 全員のチップを持ち点 100 に初期化
+        state.players.forEach(p => {
+          p.chips = INITIAL_CHIPS;
+          p.hand = [];
+          p.roundBet = 0;
+          p.totalBet = 0;
+          p.isFolded = false;
+        });
+        state.pot = 0;
+        
+        showScreen("game");
+        broadcastGameState(); // ゲストに pregame 状態を通知
+      }
+
+      function handleOnlineMessage(peerId, msg) {
+        const { type, payload } = msg;
+        if (state.isHost) {
+          if (type === "JOIN") {
+            const newPlayer = {
+              id: `player-${peerId}`, peerId: peerId, name: payload.name, chips: INITIAL_CHIPS,
+              hand: [], roundBet: 0, totalBet: 0, isFolded: false, isCpu: false, isHost: false
+            };
+            if (state.players.length < 4) {
+              state.players.push(newPlayer);
+              addLog("ロビー", `${payload.name} が参加しました`);
+              updateWaitingRoomUI();
+              broadcastPlayerList();
+            } else {
+              peerManager.send(peerId, { type: "JOIN_REJECT", payload: { reason: "満員です" } });
+            }
+          }
+          if (type === "ACTION") {
+            const playerIdx = state.players.findIndex(p => p.peerId === peerId);
+            const player = state.players[playerIdx];
+            if (playerIdx === state.activePlayerIndex) {
+              processAction(player.id, payload.action, payload.amount);
+            }
+          }
+        } else {
+          if (type === "JOIN_REJECT") { alert(`接続拒否: ${payload.reason}`); exitToLobby(); }
+          if (type === "PLAYER_LIST_UPDATE") { syncPlayers(payload.players); updateWaitingRoomUI(); }
+          if (type === "GAME_STATE_UPDATE") {
+            modals.showdown.style.display = "none";
+            modals.roulette.style.display = "none";
+            if (state.mode !== "game" && payload.mode === "game") {
+              addLog(null, "親が局を開始しました！", "log-system");
+            }
+            if (state.mode !== "game" && state.mode !== "pregame") { 
+              showScreen("game"); 
+            }
+            syncGameState(payload);
+            updateUI();
+            
+            if (state.mode === "game") {
+              const activePlayer = state.players[state.activePlayerIndex];
+              if (activePlayer.id === "me") {
+                addLog(null, "あなたの番です。行動を選択してください。", "log-highlight");
+                enableActionPanel(true);
+              } else {
+                enableActionPanel(false);
+              }
+            }
+          }
+          if (type === "ROULETTE_TRIGGER") {
+            state.rouletteWinnerId = payload.rouletteWinnerId;
+            triggerRoulette(payload.rouletteWinnerId);
+          }
+          if (type === "ROULETTE_SPIN") {
+            modals.rouletteWheel.style.transition = "transform 4s cubic-bezier(0.15, 0.85, 0.35, 1)";
+            modals.rouletteWheel.style.transform = `rotate(${payload.angle}deg)`;
+            setTimeout(() => { showRouletteResult(payload.result); }, 4200);
+          }
+          if (type === "SHOWDOWN_UPDATE") {
+            const potAmount = state.pot;
+            const winnerResults = payload.playerResults.filter(pr => pr.isWinner);
+            
+            // ゲスト視点での勝者インデックスを取得（マッピング済みのためそのまま検索可能）
+            const winnerIdxs = winnerResults.map(wr => state.players.findIndex(p => p.id === wr.id)).filter(idx => idx !== -1);
+            
+            const isDefaultWin = payload.playerResults.length === 1;
+            
+            // 1. チップ演出および特大バナー演出の再生
+            if (isDefaultWin && winnerIdxs.length === 1) {
+              const winnerResult = winnerResults[0];
+              const winnerIdx = winnerIdxs[0];
+              const isButa = winnerResult.evaluatedName.includes("ブラフ");
+              
+              if (isButa) {
+                // ブタブラフお祝儀のチップ移動演出（ゲスト側でも再生）
+                state.players.forEach((p, idx) => {
+                  if (idx !== winnerIdx) {
+                    triggerGiftChipEffect(idx, winnerIdx, 3);
+                  }
+                });
+              }
+              
+              // ポット獲得のチップ移動演出
+              triggerPotCollectEffect(winnerIdx, potAmount);
+              
+              // 特大バナー演出の表示
+              const banner = document.createElement("div");
+              banner.className = "showdown-banner";
+              banner.style.position = "absolute";
+              banner.style.top = "40%";
+              banner.style.left = "0";
+              banner.style.width = "100%";
+              banner.style.zIndex = "2000";
+              banner.style.textAlign = "center";
+              banner.style.background = "linear-gradient(90deg, transparent, rgba(184,28,34,0.95) 15%, rgba(184,28,34,0.95) 85%, transparent)";
+              banner.style.borderTop = "2px solid var(--color-gold)";
+              banner.style.borderBottom = "2px solid var(--color-gold)";
+              banner.style.padding = "20px 0";
+              banner.style.fontFamily = "var(--font-serif)";
+              banner.style.color = "var(--color-gold-light)";
+              banner.style.fontSize = "2rem";
+              banner.style.fontWeight = "bold";
+              banner.style.textShadow = "0 2px 5px rgba(0,0,0,0.8)";
+              banner.style.boxShadow = "0 10px 25px rgba(0,0,0,0.5)";
+              
+              if (winnerResult.id === "me") {
+                banner.innerHTML = "勝負あり！ (相手全員降参)";
+              } else {
+                banner.innerHTML = `${winnerResult.name} の不戦勝 (全員降参)`;
+              }
+              
+              document.getElementById("game-screen").appendChild(banner);
+              
+              banner.animate([
+                { transform: "scaleY(0) translateY(-20px)", opacity: 0 },
+                { transform: "scaleY(1) translateY(0)", opacity: 1 }
+              ], { duration: 400, easing: "ease-out" });
+              
+              if (winnerResult.id === "me") {
+                setTimeout(() => {
+                  confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+                }, 200);
+              }
+              
+              setTimeout(() => {
+                banner.animate([
+                  { transform: "scaleY(1)", opacity: 1 },
+                  { transform: "scaleY(0)", opacity: 0 }
+                ], { duration: 300, easing: "ease-in" }).onfinish = () => {
+                  banner.remove();
+                };
+              }, 2200);
+              
+            } else {
+              // 通常のショーダウンまたはツキ決着時のポット回収演出
+              winnerIdxs.forEach(winIdx => {
+                triggerPotCollectEffect(winIdx, potAmount / winnerIdxs.length);
+              });
+            }
+            
+            // 十ゾロ(10.10)お祝儀判定
+            const hasTozoroWinner = payload.playerResults.some(pr => pr.isWinner && pr.evaluatedName.includes("十ゾロ"));
+            
+            // 演出が終了するまで待ってからダイアログを表示する
+            const delayTime = isDefaultWin ? 2500 : 1200;
+            
+            setTimeout(() => {
+              if (hasTozoroWinner) {
+                const tozoroWinner = payload.playerResults.find(pr => pr.isWinner && pr.evaluatedName.includes("十ゾロ"));
+                triggerTozoroEffect(tozoroWinner.id, () => {
+                  syncPlayers(payload.players);
+                  state.pot = payload.pot;
+                  updateUI();
+                  showShowdownResult(payload.playerResults, payload.giftText);
+                });
+              } else {
+                syncPlayers(payload.players);
+                state.pot = payload.pot;
+                updateUI();
+                showShowdownResult(payload.playerResults, payload.giftText);
+              }
+            }, delayTime);
+          }
+          if (type === "TSUKI_ROUND_START") {
+            state.isTsuki = true;
+            state.deckCount = payload.deckCount;
+            let banner = document.getElementById("tsuki-banner");
+            if (!banner) {
+              banner = document.createElement("div");
+              banner.id = "tsuki-banner";
+              banner.innerHTML = "同点引き分け！<br>ツキ（延長戦）開始！";
+              document.body.appendChild(banner);
+              setTimeout(() => { banner.classList.add("show"); }, 50);
+              setTimeout(() => {
+                banner.classList.remove("show");
+                setTimeout(() => banner.remove(), 500);
+              }, 2200);
+            }
+            runClientTsukiRound(payload.drawnCards);
+          }
+          if (type === "TSUKI_RETRY") {
+            addLog(null, "ツキ：役が出ませんでした。カードを回収して配り直します...", "log-system");
+            state.players.forEach((p, idx) => {
+              triggerFoldCardEffect(idx);
+            });
+            setTimeout(() => {
+              state.players.forEach(p => { p.hand = []; });
+              gameElems.myHandContainer.innerHTML = "";
+              clearAllPlayerMiniCards();
+              updateUI();
+            }, 800);
+          }
+          if (type === "TSUKI_TIE") {
+            addLog(null, "ツキ：最強役が同点です。カードを回収して配り直します...", "log-system");
+            state.players.forEach((p, idx) => {
+              triggerFoldCardEffect(idx);
+            });
+            setTimeout(() => {
+              state.players.forEach(p => { p.hand = []; });
+              gameElems.myHandContainer.innerHTML = "";
+              clearAllPlayerMiniCards();
+              updateUI();
+            }, 800);
+          }
+          if (type === "ACTION_EFFECT") {
+            let targetId = payload.playerId;
+            let localPlayerId = targetId;
+            const myPlayerObj = state.players.find(pl => pl.id === "me");
+            const myPeerId = myPlayerObj ? myPlayerObj.peerId : "";
+            
+            if (targetId === "me") {
+              localPlayerId = "host";
+            } else if (targetId === `player-${myPeerId}`) {
+              localPlayerId = "me";
+            }
+            
+            const playerIdx = state.players.findIndex(p => p.id === localPlayerId);
+            const player = state.players[playerIdx];
+            
+            if (player) {
+              if (payload.action === "fold") {
+                addLog(player.name, "降参 (Fold) しました", "log-danger");
+                triggerFoldCardEffect(playerIdx);
+              } else if (payload.action === "call") {
+                if (payload.amount === 0 && state.currentBet === 0) {
+                  addLog(player.name, "パス (Check) しました");
+                } else {
+                  addLog(player.name, `${payload.amount} チップを賭けました (Call)`);
+                  triggerBetChipEffect(playerIdx, payload.amount);
+                }
+              } else if (payload.action === "raise") {
+                addLog(player.name, `賭け金を上乗せしました (Raise)`);
+                triggerBetChipEffect(playerIdx, payload.amount);
+              }
+            }
+          }
+        }
+      }
+
+      function broadcastPlayerList() {
+        const syncList = state.players.map(p => ({
+          id: p.id === "me" ? `player-${p.peerId}` : p.id, peerId: p.peerId, name: p.name, isHost: p.isHost
+        }));
+        peerManager.send(null, { type: "PLAYER_LIST_UPDATE", payload: { players: syncList } });
+      }
+
+      function broadcastGameState() {
+        state.players.forEach(p => {
+          if (p.id === "me") return;
+          const guestPayload = {
+            mode: state.mode,
+            players: state.players.map(pl => ({
+              id: pl.id === p.id ? "me" : (pl.id === "me" ? "host" : pl.id),
+              name: pl.name, chips: pl.chips, roundBet: pl.roundBet, totalBet: pl.totalBet,
+              isFolded: pl.isFolded, isHost: pl.isHost, actionCount: pl.actionCount,
+              hasActedInRound: pl.hasActedInRound,
+              hand: (pl.id === p.id && state.mode === "game") ? pl.hand : [0, 0]
+            })),
+            pot: state.pot, currentBet: state.currentBet, betRound: state.betRound,
+            roundRaiseTotal: state.roundRaiseTotal,
+            activePlayerIndex: state.activePlayerIndex, dealerIndex: state.dealerIndex, deckCount: state.deck ? state.deck.length : 21
+          };
+          peerManager.send(p.peerId, { type: "GAME_STATE_UPDATE", payload: guestPayload });
+        });
+        updateUI();
+        if (state.mode === "game") {
+          startTurn();
+        }
+      }
+
+      function broadcastRouletteTrigger(winnerId) {
+        state.players.forEach(p => {
+          if (p.id === "me") return;
+          let clientWinnerId = winnerId;
+          if (winnerId === "me") clientWinnerId = "host";
+          else if (winnerId === p.id) clientWinnerId = "me";
+          
+          peerManager.send(p.peerId, {
+            type: "ROULETTE_TRIGGER",
+            payload: { rouletteWinnerId: clientWinnerId }
+          });
+        });
+        triggerRoulette(winnerId);
+      }
+
+      function broadcastShowdown(playerResults, giftText, triggerRouletteFlag) {
+        state.players.forEach(p => {
+          if (p.id === "me") return;
+          const clientResults = playerResults.map(pr => {
+            let mappedId = pr.id;
+            if (pr.id === "me") mappedId = "host";
+            else if (pr.id === p.id) mappedId = "me";
+            return { ...pr, id: mappedId };
+          });
+          peerManager.send(p.peerId, {
+            type: "SHOWDOWN_UPDATE",
+            payload: {
+              playerResults: clientResults, giftText, pot: state.pot, triggerRoulette: triggerRouletteFlag,
+              rouletteWinnerId: state.rouletteWinnerId === "me" ? "host" : (state.rouletteWinnerId === p.id ? "me" : state.rouletteWinnerId),
+              players: state.players.map(pl => ({ id: pl.id === p.id ? "me" : (pl.id === "me" ? "host" : pl.id), chips: pl.chips }))
+            }
+          });
+        });
+        if (triggerRouletteFlag) triggerRoulette(state.rouletteWinnerId);
+        else showShowdownResult(playerResults, giftText);
+      }
+
+      function syncPlayers(syncList) {
+        state.players = syncList.map(p => {
+          const existing = state.players.find(ep => ep.id === p.id);
+          return {
+            ...p,
+            chips: p.chips !== undefined ? p.chips : (existing ? existing.chips : INITIAL_CHIPS),
+            hand: existing ? existing.hand : [], roundBet: existing ? existing.roundBet : 0,
+            isFolded: existing ? existing.isFolded : false
+          };
+        });
+      }
+
+      function syncGameState(payload) {
+        state.mode = payload.mode;
+        state.isTsuki = payload.isTsuki || false;
+        state.players = payload.players;
+        state.pot = payload.pot;
+        state.currentBet = payload.currentBet;
+        state.betRound = payload.betRound;
+        state.roundRaiseTotal = payload.roundRaiseTotal;
+        state.activePlayerIndex = payload.activePlayerIndex;
+        state.dealerIndex = payload.dealerIndex;
+        state.deckCount = payload.deckCount;
+      }
+
+      function updateWaitingRoomUI() {
+        waitingElems.list.innerHTML = "";
+        state.players.forEach(p => {
+          const isMe = p.id === "me" || (p.peerId === state.myId);
+          const hostBadge = p.isHost ? `<span class="member-host-badge">親</span>` : "";
+          waitingElems.list.innerHTML += `
+            <li class="member-item">
+              <span>${p.name} ${isMe ? "(あなた)" : ""}</span>
+              ${hostBadge}
+            </li>`;
+        });
+        if (state.isHost && state.players.length >= 2) {
+          waitingElems.start.classList.remove("btn-disabled");
+          waitingElems.status.textContent = "対戦を開始できます。";
+        } else {
+          waitingElems.start.classList.add("btn-disabled");
+          waitingElems.status.textContent = state.isHost ? "他のプレイヤーが接続するのを待っています..." : "ホストがゲームを開始するのをお待ちください...";
+        }
+      }
+
+      // --- UI更新 ---
+      function updateUI() {
+        gameElems.pot.textContent = state.pot;
+
+        // 配札前(pregame)と局進行中(game)の表示制御
+        if (state.mode === "pregame") {
+          gameElems.roundText.textContent = "配札前 (準備完了)";
+          gameElems.deckText.textContent = "山札: 21枚";
+          
+          if (state.isHost) {
+            gameElems.btnDealHand.style.display = "block";
+            document.getElementById("waiting-host-deal-text").style.display = "none";
+          } else {
+            gameElems.btnDealHand.style.display = "none";
+            document.getElementById("waiting-host-deal-text").style.display = "block";
+          }
+          gameElems.turnText.textContent = "局の開始を待っています...";
+          enableActionPanel(false); // ベットボタン類はすべて無効化
+        } else {
+          const dealer = state.players[state.dealerIndex];
+          const currentRound = dealer ? Math.min(3, dealer.actionCount + 1) : 1;
+          gameElems.roundText.textContent = `${currentRound}周目 / 3周`;
+          gameElems.deckText.textContent = `山札: ${state.deckCount !== undefined ? state.deckCount : (state.deck ? state.deck.length : 21)}枚`;
+          gameElems.btnDealHand.style.display = "none";
+          document.getElementById("waiting-host-deal-text").style.display = "none";
+          
+          // 現在アクティブなプレイヤー名を表示
+          const activePlayer = state.players[state.activePlayerIndex];
+          if (activePlayer) {
+            gameElems.turnText.textContent = `手番: ${activePlayer.name} ${activePlayer.id === 'me' ? '(あなたの番)' : '(思考中)'}`;
+          } else {
+            gameElems.turnText.textContent = "手番: --";
+          }
+        }
+
+        const seatIds = ["seat-top", "seat-left", "seat-right", "seat-bottom"];
+        seatIds.forEach(id => document.getElementById(id).style.display = "none");
+
+        const myIndex = state.players.findIndex(p => p.id === "me");
+        if (myIndex === -1) {
+          debugLog("警告: 自分 (id='me') が players 配列内に見つかりません。");
+          return;
+        }
+        
+        const seatAssignments = ["seat-bottom", "seat-top", "seat-left", "seat-right"];
+        const seatToPlayerNum = {
+          "seat-bottom": 1,
+          "seat-top": 2,
+          "seat-left": 3,
+          "seat-right": 4
+        };
+        
+        state.players.forEach((p, idx) => {
+          const relativeIdx = (idx - myIndex + state.players.length) % state.players.length;
+          const seatId = seatAssignments[relativeIdx];
+          const seatDiv = document.getElementById(seatId);
+          if (!seatDiv) return;
+          seatDiv.style.display = "flex";
+          
+          const playerNum = seatToPlayerNum[seatId];
+          const panelId = `panel-player${playerNum}`;
+          const nameId = `name-player${playerNum}`;
+          const chipsId = `chips-player${playerNum}`;
+          const cardsId = `cards-player${playerNum}`;
+          const badgeId = `badge-player${playerNum}`;
+          
+          const panel = document.getElementById(panelId);
+          const nameEl = document.getElementById(nameId);
+          const chipsEl = document.getElementById(chipsId);
+          const cardsEl = document.getElementById(cardsId);
+          const badge = document.getElementById(badgeId);
+          
+          if (!panel || !nameEl || !chipsEl) {
+            debugLog(`警告: ID不一致で要素が取得できません (seatId: ${seatId}, playerNum: ${playerNum})`);
+            return;
+          }
+          
+          const dealerBtnId = `dealer-btn-player${playerNum}`;
+          const dealerBtn = document.getElementById(dealerBtnId);
+          if (dealerBtn) {
+            dealerBtn.style.display = (idx === state.dealerIndex) ? "inline-flex" : "none";
+          }
+          
+          nameEl.textContent = p.name;
+          chipsEl.textContent = p.chips;
+          
+          if (idx === state.activePlayerIndex && state.mode === "game") panel.classList.add("active-turn");
+          else panel.classList.remove("active-turn");
+          
+          if (p.isFolded) {
+            panel.classList.add("folded");
+            badge.style.display = "inline-block";
+            badge.className = "player-status-badge badge-fold";
+            badge.textContent = "降参";
+          } else {
+            panel.classList.remove("folded");
+            if (idx === state.activePlayerIndex && state.mode === "game") {
+              badge.style.display = "inline-block";
+              badge.className = "player-status-badge badge-active";
+              badge.textContent = p.id === "me" ? "選択中" : "思考中";
+            } else if (p.roundBet > 0) {
+              badge.style.display = "inline-block";
+              badge.className = "player-status-badge badge-bet";
+              badge.textContent = `${p.roundBet} 賭`;
+            } else {
+              badge.style.display = "none";
+            }
+          }
+          
+          if (p.id !== "me") {
+            const existingMini = cardsEl.querySelectorAll(".kabu-card");
+            if (existingMini.length !== 2 && p.hand && p.hand.length === 2 && !p.isFolded && state.mode === "game") {
+              cardsEl.innerHTML = "";
+              let mc1, mc2;
+              if (state.isTsuki) {
+                mc1 = renderCardElement(p.hand[0], false);
+                mc2 = renderCardElement(p.hand[1], false);
+              } else {
+                mc1 = createMiniCardBack();
+                mc2 = createMiniCardBack();
+              }
+              
+              mc1.style.opacity = "0";
+              mc1.style.transform = "translateY(-15px)";
+              mc1.style.transition = "all 0.3s ease-out";
+              cardsEl.appendChild(mc1);
+              
+              mc2.style.opacity = "0";
+              mc2.style.transform = "translateY(-15px)";
+              mc2.style.transition = "all 0.3s ease-out";
+              mc2.style.transitionDelay = "0.1s";
+              cardsEl.appendChild(mc2);
+              
+              mc1.offsetHeight; // リフロー
+              mc1.style.opacity = "1";
+              mc1.style.transform = "translateY(0)";
+              mc2.style.opacity = "1";
+              mc2.style.transform = "translateY(0)";
+            }
+          }
+        });
+
+        const myPlayer = state.players[myIndex];
+        if (state.mode === "game" && myPlayer && myPlayer.hand && myPlayer.hand.length === 2) {
+          const existingCards = gameElems.myHandContainer.querySelectorAll(".kabu-card");
+          if (existingCards.length !== 2) {
+            gameElems.myHandContainer.innerHTML = "";
+            const c1 = renderCardElement(myPlayer.hand[0], true);
+            const c2 = renderCardElement(myPlayer.hand[1], true);
+            
+            c1.style.opacity = "0";
+            c1.style.transform = "translateY(-80px) rotate(-10deg) scale(0.8)";
+            c1.style.transition = "all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+            gameElems.myHandContainer.appendChild(c1);
+            
+            c2.style.opacity = "0";
+            c2.style.transform = "translateY(-80px) rotate(-10deg) scale(0.8)";
+            c2.style.transition = "all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+            c2.style.transitionDelay = "0.2s"; // トランジション遅延
+            gameElems.myHandContainer.appendChild(c2);
+            
+            c1.offsetHeight; // リフローしてtransition有効化
+            c1.style.opacity = "1";
+            c1.style.transform = "translateY(0) rotate(0) scale(1)";
+            c2.style.opacity = "1";
+            c2.style.transform = "translateY(0) rotate(0) scale(1)";
+            
+            const myEval = evaluateHand(myPlayer.hand);
+            const is1_2 = (Math.min(...myPlayer.hand) === 1 && Math.max(...myPlayer.hand) === 2);
+            
+            gameElems.myHandRank.textContent = "手札: 配札中...";
+            gameElems.myHandRank.style.opacity = "0.3";
+            setTimeout(() => {
+              if (state.mode === "game") {
+                gameElems.myHandRank.textContent = is1_2 ? "手札: 三点 (1.2) [十ゾロキラー]" : `手札: ${myEval.name}`;
+                gameElems.myHandRank.style.opacity = "1";
+                gameElems.myHandRank.style.transition = "opacity 0.3s ease";
+              }
+            }, 600);
+            
+            debugLog(`手札描画完了: [${myPlayer.hand[0]}, ${myPlayer.hand[1]}]`);
+          }
+        } else {
+          gameElems.myHandContainer.innerHTML = "";
+          gameElems.myHandRank.textContent = "手札: --";
+          if (state.mode === "pregame") {
+            debugLog("手札表示: pregame状態のため空（配札前）");
+          } else {
+            debugLog("警告: 自分の手札情報が空、または2枚ありません。");
+          }
+        }
+        updateActionControls();
+      }
+
+      function updateActionControls() {
+        if (state.mode === "pregame") {
+          enableActionPanel(false);
+          return;
+        }
+        const myPlayer = state.players.find(p => p.id === "me");
+        const activePlayer = state.players[state.activePlayerIndex];
+        if (!myPlayer || !activePlayer || activePlayer.id !== "me" || myPlayer.isFolded) {
+          enableActionPanel(false);
+          return;
+        }
+        enableActionPanel(true);
+        
+        const needed = state.currentBet - myPlayer.roundBet;
+        // 常に最低 1 ベットルール：同額(needed === 0)であっても、最低1チップを支払わなければならない
+        const callAmount = needed === 0 ? 1 : needed;
+        
+        if (needed === 0) {
+          gameElems.btnCall.textContent = "最低ベット (Bet: 1)";
+        } else {
+          if (callAmount >= myPlayer.chips) {
+            gameElems.btnCall.textContent = `全賭け (All-in: ${myPlayer.chips})`;
+          } else {
+            gameElems.btnCall.textContent = `同額 (Call: ${callAmount})`;
+          }
+        }
+
+        const minRaise = 1;
+        const remainingRaiseLimit = Math.max(0, 3 - state.roundRaiseTotal);
+        const maxPossibleRaise = Math.min(remainingRaiseLimit, myPlayer.chips - callAmount);
+        if (maxPossibleRaise < minRaise || myPlayer.chips <= callAmount) {
+          document.getElementById("raise-slider-container").style.display = "none";
+        } else {
+          document.getElementById("raise-slider-container").style.display = "flex";
+          gameElems.raiseSlider.min = minRaise;
+          gameElems.raiseSlider.max = maxPossibleRaise;
+          gameElems.raiseSlider.value = minRaise;
+          gameElems.raiseVal.innerHTML = `<span class="chip-token"></span> ${minRaise}`;
+        }
+      }
+
+      function enableActionPanel(enable) {
+        if (enable) gameElems.actionPanel.classList.remove("btn-disabled");
+        else gameElems.actionPanel.classList.add("btn-disabled");
+      }
+
+      function renderCardElement(num, isLarge = true) {
+        const cardDiv = document.createElement("div");
+        cardDiv.className = `kabu-card ${isLarge ? 'my-card' : ''}`;
+        const faceDiv = document.createElement("div");
+        faceDiv.className = "card-face";
+        const jpNum = getKanjiNumber(num);
+        const jpNumDiv = document.createElement("div");
+        jpNumDiv.className = "card-num-jp";
+        jpNumDiv.textContent = jpNum;
+        if (num === 1) jpNumDiv.style.color = "var(--color-vermilion)";
+        const artworkDiv = document.createElement("div");
+        artworkDiv.className = "card-artwork";
+        artworkDiv.innerHTML = getCardArtworkSvg(num);
+        const enNumDiv = document.createElement("div");
+        enNumDiv.className = "card-num-en";
+        enNumDiv.textContent = num;
+        faceDiv.appendChild(jpNumDiv);
+        faceDiv.appendChild(artworkDiv);
+        faceDiv.appendChild(enNumDiv);
+        cardDiv.appendChild(faceDiv);
+        return cardDiv;
+      }
+
+      function renderCardHtml(num, isLarge = false) {
+        const jpNum = getKanjiNumber(num);
+        const colorStyle = num === 1 ? 'color: var(--color-vermilion);' : '';
+        const sizeClass = isLarge ? 'my-card' : '';
+        return `
+          <div class="kabu-card ${sizeClass}">
+            <div class="card-face">
+              <div class="card-num-jp" style="${colorStyle}">${jpNum}</div>
+              <div class="card-artwork">${getCardArtworkSvg(num)}</div>
+              <div class="card-num-en">${num}</div>
+            </div>
+          </div>`;
+      }
+
+      function createMiniCardBack() {
+        const cardDiv = document.createElement("div");
+        cardDiv.className = "kabu-card card-back";
+        return cardDiv;
+      }
+
+      function getKanjiNumber(num) {
+        const kanji = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+        return kanji[num] || "";
+      }
+
+      function getCardArtworkSvg(num) {
+        const red = "#b81c22", gold = "#d4af37", dark = "#2b2523", blue = "#2b5c8f";
+        switch(num) {
+          case 1: return `<svg viewBox="0 0 100 100" class="artwork-svg"><circle cx="50" cy="50" r="30" fill="${red}" /><path d="M 50,10 L 50,90 M 10,50 L 90,50 M 22,22 L 78,78 M 22,78 L 78,22" stroke="${gold}" stroke-width="2" /></svg>`;
+          case 2: return `<svg viewBox="0 0 100 100" class="artwork-svg"><path d="M 50,25 C 40,25 35,40 50,55 C 65,40 60,25 50,25 Z" fill="${dark}" /><path d="M 30,50 C 20,50 15,65 30,80 C 45,65 40,50 30,50 Z" fill="${dark}" /><path d="M 70,50 C 60,50 55,65 70,80 C 85,65 80,50 70,50 Z" fill="${dark}" /><circle cx="50" cy="65" r="8" fill="${red}" /></svg>`;
+          case 3: return `<svg viewBox="0 0 100 100" class="artwork-svg"><path d="M50 15 C45 35, 25 30, 35 50 C20 45, 15 65, 35 70 C30 85, 50 80, 50 65 C50 80, 70 85, 65 70 C85 65, 80 45, 65 50 C75 30, 55 35, 50 15 Z" fill="${red}" stroke="${gold}" stroke-width="1.5" /><circle cx="50" cy="53" r="5" fill="${gold}" /></svg>`;
+          case 4: return `<svg viewBox="0 0 100 100" class="artwork-svg"><rect x="25" y="20" width="50" height="60" fill="none" stroke="${blue}" stroke-width="4" /><line x1="25" y1="40" x2="75" y2="40" stroke="${blue}" stroke-width="2" /><line x1="25" y1="60" x2="75" y2="60" stroke="${blue}" stroke-width="2" /><circle cx="50" cy="40" r="6" fill="${red}" /><circle cx="50" cy="60" r="6" fill="${gold}" /></svg>`;
+          case 5: return `<svg viewBox="0 0 100 100" class="artwork-svg"><circle cx="50" cy="38" r="14" fill="${red}" /><circle cx="35" cy="55" r="14" fill="${red}" /><circle cx="65" cy="55" r="14" fill="${red}" /><circle cx="41" cy="72" r="14" fill="${red}" /><circle cx="59" cy="72" r="14" fill="${red}" /><circle cx="50" cy="55" r="8" fill="${gold}" /></svg>`;
+          case 6: return `<svg viewBox="0 0 100 100" class="artwork-svg"><path d="M15 75 C 30 45, 70 45, 85 75 Z" fill="${gold}" stroke="${dark}" stroke-width="2" /><path d="M15 75 L 50 85 L 85 75 Z" fill="${red}" /><circle cx="50" cy="60" r="10" fill="${dark}" /></svg>`;
+          case 7: return `<svg viewBox="0 0 100 100" class="artwork-svg"><path d="M 20 20 L 50 50 L 20 80 M 80 20 L 50 50 L 80 80" stroke="${blue}" stroke-width="6" fill="none" stroke-linejoin="round"/><circle cx="50" cy="50" r="12" fill="${red}" /></svg>`;
+          case 8: return `<svg viewBox="0 0 100 100" class="artwork-svg"><circle cx="50" cy="45" r="28" fill="${gold}" /><path d="M 20 90 Q 50 40, 80 90 M 35 90 Q 50 50, 65 90" stroke="${dark}" stroke-width="3" fill="none" /></svg>`;
+          case 9: return `<svg viewBox="0 0 100 100" class="artwork-svg"><path d="M 20 40 Q 50 20, 80 40 L 65 75 Q 50 85, 35 75 Z" fill="${red}" stroke="${gold}" stroke-width="2" /><text x="50" y="58" font-family="var(--font-serif)" font-size="20" font-weight="900" fill="${gold}" text-anchor="middle">寿</text></svg>`;
+          case 10: return `<svg viewBox="0 0 100 100" class="artwork-svg"><path d="M 50,15 L 80,45 L 65,45 L 80,75 L 20,75 L 35,45 L 20,45 Z" fill="${red}" stroke="${gold}" stroke-width="2" /><circle cx="50" cy="60" r="8" fill="${dark}" /></svg>`;
+          default: return `<svg viewBox="0 0 100 100" class="artwork-svg"></svg>`;
+        }
+      }
+
+      function exitToLobby() {
+        if (peerManager) peerManager.cleanup();
+        modals.rules.style.display = "none";
+        modals.roulette.style.display = "none";
+        modals.showdown.style.display = "none";
+        state.mode = "lobby";
+        state.players = [];
+        showScreen("lobby");
+        addLog(null, "ロビーに戻りました。");
+      }
+    })();
+  </script>
+</body>
+</html>

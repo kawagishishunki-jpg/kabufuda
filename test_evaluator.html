@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>株ポーカー 役判定エンジン テストスイート</title>
+  <style>
+    body {
+      background-color: #120e0c;
+      color: #faf5eb;
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    h1 {
+      border-bottom: 2px solid #d4af37;
+      padding-bottom: 10px;
+      color: #fbe695;
+    }
+    .test-case {
+      background: #2b2523;
+      border: 1px solid #d4af37;
+      border-radius: 4px;
+      padding: 10px 15px;
+      margin-bottom: 10px;
+    }
+    .pass {
+      color: #a3be8c;
+      font-weight: bold;
+    }
+    .fail {
+      color: #b81c22;
+      font-weight: bold;
+    }
+    .summary {
+      font-size: 1.2rem;
+      margin: 20px 0;
+      padding: 10px;
+      background: #1a5c1a;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .summary.has-failures {
+      background: #7c0b0f;
+    }
+  </style>
+</head>
+<body>
+  <h1>株ポーカー 役判定エンジン テスト</h1>
+  <div id="summary-area" class="summary">テストを実行中...</div>
+  <div id="results-area"></div>
+
+  <script>
+    // --- 1. 役判定エンジン (evaluator.js) のコードをインライン化 ---
+    const HAND_TYPES = {
+      ZORO_10: 19,
+      ZORO_9: 18,
+      ZORO_8: 17,
+      ZORO_7: 16,
+      ZORO_6: 15,
+      ZORO_5: 14,
+      ZORO_4: 13,
+      ZORO_3: 12,
+      ZORO_2: 11,
+      ZORO_1: 10,
+      TOPPIN: 9,
+      KUPPIN: 8,
+      SHIPPIN: 7,
+      POINTS_9: 6,
+      POINTS_8: 5,
+      POINTS_7: 4,
+      POINTS_6: 3,
+      POINTS_5: 2,
+      POINTS_4: 1,
+      POINTS_3: 0,
+      POINTS_2: -1,
+      POINTS_1: -2,
+      POINTS_0: -3
+    };
+
+    const HAND_NAMES = {
+      [HAND_TYPES.ZORO_10]: "じゅんじゅん (10.10)",
+      [HAND_TYPES.ZORO_9]: "九ゾロ (9.9)",
+      [HAND_TYPES.ZORO_8]: "八ゾロ (8.8)",
+      [HAND_TYPES.ZORO_7]: "七ゾロ (7.7)",
+      [HAND_TYPES.ZORO_6]: "六ゾロ (6.6)",
+      [HAND_TYPES.ZORO_5]: "五ゾロ (5.5)",
+      [HAND_TYPES.ZORO_4]: "四ゾロ (4.4)",
+      [HAND_TYPES.ZORO_3]: "三ゾロ (3.3)",
+      [HAND_TYPES.ZORO_2]: "二ゾロ (2.2)",
+      [HAND_TYPES.ZORO_1]: "ピンピン (1.1)",
+      [HAND_TYPES.TOPPIN]: "とっぴん (10.1)",
+      [HAND_TYPES.KUPPIN]: "くっピン (9.1)",
+      [HAND_TYPES.SHIPPIN]: "しっぴん (4.1)",
+      [HAND_TYPES.POINTS_9]: "九点 (カブ)",
+      [HAND_TYPES.POINTS_8]: "八点 (オイチョ)",
+      [HAND_TYPES.POINTS_7]: "七点 (ナキ)",
+      [HAND_TYPES.POINTS_6]: "六点 (ロッポウ)",
+      [HAND_TYPES.POINTS_5]: "五点 (ゴケ)",
+      [HAND_TYPES.POINTS_4]: "四点 (ヨツ)",
+      [HAND_TYPES.POINTS_3]: "三点 (サンタ)",
+      [HAND_TYPES.POINTS_2]: "二点 (ニタ)",
+      [HAND_TYPES.POINTS_1]: "一点 (ピン)",
+      [HAND_TYPES.POINTS_0]: "ブタ (0点)"
+    };
+
+    function evaluateHand(hand) {
+      if (!hand || hand.length !== 2) {
+        throw new Error("手札は2枚である必要があります");
+      }
+      const cards = [...hand].sort((a, b) => a - b);
+      const [c1, c2] = cards;
+
+      if (c1 === c2) {
+        const type = HAND_TYPES.ZORO_1 + (c1 - 1);
+        return { type, name: HAND_NAMES[type], cards };
+      }
+
+      if (c1 === 1 && c2 === 4) {
+        return { type: HAND_TYPES.SHIPPIN, name: HAND_NAMES[HAND_TYPES.SHIPPIN], cards };
+      }
+      if (c1 === 1 && c2 === 9) {
+        return { type: HAND_TYPES.KUPPIN, name: HAND_NAMES[HAND_TYPES.KUPPIN], cards };
+      }
+      if (c1 === 1 && c2 === 10) {
+        return { type: HAND_TYPES.TOPPIN, name: HAND_NAMES[HAND_TYPES.TOPPIN], cards };
+      }
+
+      const sum = c1 + c2;
+      const points = sum % 10;
+      const type = HAND_TYPES.POINTS_0 + points;
+
+      return { type, name: HAND_NAMES[type], cards };
+    }
+
+    function determineWinners(players) {
+      if (!players || players.length === 0) {
+        return { winners: [], details: {} };
+      }
+
+      const evaluatedPlayers = players.map(p => {
+        const evaluation = evaluateHand(p.hand);
+        return {
+          id: p.id,
+          name: p.name,
+          hand: p.hand,
+          evaluation,
+          is1_2: (Math.min(...p.hand) === 1 && Math.max(...p.hand) === 2),
+          is10_10: (p.hand[0] === 10 && p.hand[1] === 10)
+        };
+      });
+
+      const has10_10 = evaluatedPlayers.some(p => p.is10_10);
+      const has1_2 = evaluatedPlayers.some(p => p.is1_2);
+      const killerTriggered = has10_10 && has1_2;
+
+      const scoredPlayers = evaluatedPlayers.map(p => {
+        let effectiveScore = p.evaluation.type;
+        let customName = p.evaluation.name;
+
+        if (killerTriggered) {
+          if (p.is1_2) {
+            effectiveScore = HAND_TYPES.ZORO_10 + 1;
+            customName = "10.10キラー (1.2)";
+          } else if (p.is10_10) {
+            effectiveScore = HAND_TYPES.POINTS_0 - 1;
+            customName = "10.10 (キラー撃破)";
+          }
+        }
+
+        return { ...p, effectiveScore, customName };
+      });
+
+      let maxScore = -Infinity;
+      scoredPlayers.forEach(p => {
+        if (p.effectiveScore > maxScore) {
+          maxScore = p.effectiveScore;
+        }
+      });
+
+      const winners = scoredPlayers
+        .filter(p => p.effectiveScore === maxScore)
+        .map(p => p.id);
+
+      return {
+        winners,
+        players: scoredPlayers.map(p => ({
+          id: p.id,
+          name: p.name,
+          hand: p.hand,
+          evaluatedName: p.customName,
+          score: p.effectiveScore,
+          isWinner: winners.includes(p.id)
+        })),
+        killerTriggered
+      };
+    }
+
+    // --- 2. テストランナー ---
+    const resultsArea = document.getElementById("results-area");
+    const summaryArea = document.getElementById("summary-area");
+    
+    let totalTests = 0;
+    let passedTests = 0;
+
+    function assert(name, condition, message = "") {
+      totalTests++;
+      const div = document.createElement("div");
+      div.className = "test-case";
+      
+      if (condition) {
+        passedTests++;
+        div.innerHTML = `【PASS】 ${name} <span class="pass">成功</span> ${message ? `- ${message}` : ""}`;
+      } else {
+        div.innerHTML = `【FAIL】 ${name} <span class="fail">失敗</span> ${message ? `- ${message}` : ""}`;
+      }
+      resultsArea.appendChild(div);
+    }
+
+    // --- テスト実行 ---
+    try {
+      const h1 = evaluateHand([4, 1]);
+      assert("しっぴん判定 (4.1)", h1.type === HAND_TYPES.SHIPPIN, `得られた役: ${h1.name}`);
+
+      const h2 = evaluateHand([9, 1]);
+      assert("くっぴん判定 (9.1)", h2.type === HAND_TYPES.KUPPIN, `得られた役: ${h2.name}`);
+
+      const h3 = evaluateHand([10, 1]);
+      assert("とっぴん判定 (10.1)", h3.type === HAND_TYPES.TOPPIN, `得られた役: ${h3.name}`);
+
+      const h4 = evaluateHand([10, 10]);
+      assert("十ゾロ判定 (10.10)", h4.type === HAND_TYPES.ZORO_10, `得られた役: ${h4.name}`);
+
+      const h5 = evaluateHand([1, 1]);
+      assert("ピンゾロ判定 (1.1)", h5.type === HAND_TYPES.ZORO_1, `得られた役: ${h5.name}`);
+
+      const h6 = evaluateHand([7, 6]);
+      assert("通常点数判定 (7+6 -> 3点)", h6.type === HAND_TYPES.POINTS_3, `得られた役: ${h6.name}`);
+
+      const h7 = evaluateHand([1, 2]);
+      assert("1.2の手札評価 (通常時は3点)", h7.type === HAND_TYPES.POINTS_3, `得られた役: ${h7.name}`);
+
+      const h8 = evaluateHand([5, 5]);
+      assert("ゾロ目優先判定 (5.5)", h8.type === HAND_TYPES.ZORO_5, `得られた役: ${h8.name}`);
+    } catch (e) {
+      assert("通常の手札評価中に例外発生", false, e.message);
+    }
+
+    try {
+      const playersA = [
+        { id: "alice", name: "アリス", hand: [10, 10] },
+        { id: "bob", name: "ボブ", hand: [1, 2] },
+        { id: "charlie", name: "チャーリー", hand: [9, 9] }
+      ];
+      const resA = determineWinners(playersA);
+      assert(
+        "1.2キラー発動テスト (10.10 vs 1.2 vs 9.9)",
+        resA.winners.length === 1 && resA.winners[0] === "bob" && resA.killerTriggered === true,
+        `勝者: ${resA.players.find(p => p.isWinner).name} (${resA.players.find(p => p.isWinner).evaluatedName})`
+      );
+
+      const playersB = [
+        { id: "alice", name: "アリス", hand: [9, 9] },
+        { id: "bob", name: "ボブ", hand: [1, 2] }
+      ];
+      const resB = determineWinners(playersB);
+      assert(
+        "1.2キラー未発動テスト (9.9 vs 1.2)",
+        resB.winners.length === 1 && resB.winners[0] === "alice" && resB.killerTriggered === false,
+        `勝者: ${resB.players.find(p => p.isWinner).name} (${resB.players.find(p => p.isWinner).evaluatedName})`
+      );
+
+      const playersC = [
+        { id: "alice", name: "アリス", hand: [10, 10] },
+        { id: "bob", name: "ボブ", hand: [9, 9] }
+      ];
+      const resC = determineWinners(playersC);
+      assert(
+        "最強十ゾロの通常勝利テスト (10.10 vs 9.9)",
+        resC.winners.length === 1 && resC.winners[0] === "alice" && resC.killerTriggered === false,
+        `勝者: ${resC.players.find(p => p.isWinner).name} (${resC.players.find(p => p.isWinner).evaluatedName})`
+      );
+
+      const playersD = [
+        { id: "alice", name: "アリス", hand: [5, 3] },
+        { id: "bob", name: "ボブ", hand: [6, 2] }
+      ];
+      const resD = determineWinners(playersD);
+      assert(
+        "同点引き分けテスト (8点 vs 8点)",
+        resD.winners.length === 2 && resD.winners.includes("alice") && resD.winners.includes("bob"),
+        `勝者数: ${resD.winners.length}`
+      );
+    } catch (e) {
+      assert("対決判定中に例外発生", false, e.message);
+    }
+
+    summaryArea.textContent = `結果: ${passedTests} / ${totalTests} パス`;
+    if (passedTests < totalTests) {
+      summaryArea.className = "summary has-failures";
+    }
+  </script>
+</body>
+</html>
