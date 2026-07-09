@@ -1928,8 +1928,11 @@
       function runClientTsukiRound(drawnCards) {
         debugLog("ゲスト側ツキ配札アニメーション開始");
         
-        // 全員の手札をクリア
-        state.players.forEach(p => { p.hand = []; });
+        // 全員の手札とフォールド状態をクリアし、めくりゲームに全員復帰させる！
+        state.players.forEach(p => {
+          p.hand = [];
+          p.isFolded = false;
+        });
         updateUI();
         
         const dealSequence = [];
@@ -2098,6 +2101,12 @@
         // いずれかのプレイヤーのチップが0以下の場合は破産（ハコ割れ）のため対戦終了
         const bankruptPlayer = state.players.find(p => p.chips <= 0);
         if (bankruptPlayer) {
+          if (state.gameType === "online" && state.isHost) {
+            peerManager.send(null, {
+              type: "GAME_OVER",
+              payload: { bankruptName: bankruptPlayer.name }
+            });
+          }
           alert(`【対戦終了】\n${bankruptPlayer.name}のチップがなくなりました（破産）。\nゲームを終了し、ロビーに戻ります。`);
           exitToLobby();
           return;
@@ -2620,6 +2629,10 @@
                 triggerBetChipEffect(playerIdx, payload.amount);
               }
             }
+          }
+          if (type === "GAME_OVER") {
+            alert(`【対戦終了】\n${payload.bankruptName}のチップがなくなりました（破産）。\nゲームを終了し、ロビーに戻ります。`);
+            exitToLobby();
           }
         }
       }
