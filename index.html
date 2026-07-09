@@ -767,6 +767,12 @@
       function addLog(sender, text, className = "") {
         const logDiv = gameElems.log;
         if (!logDiv) return;
+        
+        // ログが100件を超えた場合、古い順に削除して蓄積を防ぐ（重くなるのを防止）
+        while (logDiv.children.length >= 100) {
+          logDiv.removeChild(logDiv.firstChild);
+        }
+        
         const entry = document.createElement("div");
         entry.className = `log-entry ${className}`;
         entry.innerHTML = sender ? `<span class="log-highlight">${sender}</span>: ${text}` : text;
@@ -2098,6 +2104,13 @@
         state.isTsuki = false;
         state.players = state.players.filter(p => !p.isDisconnected);
         
+        // 自分以外の全員が切断された場合は、対戦を終了してロビーへ戻る（孤独フリーズ防止）
+        if (state.gameType === "online" && state.players.length < 2) {
+          alert("他のプレイヤーが全員切断されたため、ゲームを終了しロビーに戻ります。");
+          exitToLobby();
+          return;
+        }
+        
         // いずれかのプレイヤーのチップが0以下の場合は破産（ハコ割れ）のため対戦終了
         const bankruptPlayer = state.players.find(p => p.chips <= 0);
         if (bankruptPlayer) {
@@ -2541,9 +2554,16 @@
             const delayTime = isDefaultWin ? 2500 : 1200;
             
             setTimeout(() => {
+              // すでに次の局に進んでいる場合はダイアログの表示をスキップ（レースコンディション対策）
+              if (state.mode === "pregame" || state.mode === "game") {
+                debugLog("ゲーム状態が既に次の局に進んでいるため、ショーダウン表示をスキップします");
+                return;
+              }
+              
               if (hasTozoroWinner) {
                 const tozoroWinner = payload.playerResults.find(pr => pr.isWinner && pr.evaluatedName.includes("十ゾロ"));
                 triggerTozoroEffect(tozoroWinner.id, () => {
+                  if (state.mode === "pregame" || state.mode === "game") return;
                   syncPlayers(payload.players);
                   state.pot = payload.pot;
                   updateUI();
@@ -2560,6 +2580,27 @@
           if (type === "TSUKI_ROUND_START") {
             state.isTsuki = true;
             state.deckCount = payload.deckCount;
+            
+            // 全プレイヤーのフォールド状態を解除し、めくりゲームに全員復帰させる
+            state.players.forEach(p => {
+              p.isFolded = false;
+            });
+            
+            // ホスト視点のIDキーを、ゲスト視点のIDキーにマッピングする（バグ修正）
+            const mappedDrawnCards = {};
+            const myPlayerObj = state.players.find(pl => pl.id === "me");
+            const myPeerId = myPlayerObj ? myPlayerObj.peerId : "";
+            
+            Object.keys(payload.drawnCards).forEach(hostPlayerId => {
+              let guestPlayerId = hostPlayerId;
+              if (hostPlayerId === "me") {
+                guestPlayerId = "host";
+              } else if (hostPlayerId === `player-${myPeerId}`) {
+                guestPlayerId = "me";
+              }
+              mappedDrawnCards[guestPlayerId] = payload.drawnCards[hostPlayerId];
+            });
+            
             let banner = document.getElementById("tsuki-banner");
             if (!banner) {
               banner = document.createElement("div");
@@ -2572,7 +2613,7 @@
                 setTimeout(() => banner.remove(), 500);
               }, 2200);
             }
-            runClientTsukiRound(payload.drawnCards);
+            runClientTsukiRound(mappedDrawnCards);
           }
           if (type === "TSUKI_RETRY") {
             addLog(null, "ツキ：役が出ませんでした。カードを回収して配り直します...", "log-system");
