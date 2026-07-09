@@ -1057,3 +1057,392 @@ header::after {
   0% { box-shadow: 0 0 30px rgba(212, 175, 55, 0.6), inset 0 0 20px rgba(0, 0, 0, 0.9); }
   100% { box-shadow: 0 0 60px rgba(212, 175, 55, 1), inset 0 0 20px rgba(184, 28, 34, 0.4); }
 }
+
+/* ===================================================
+   スマートフォン対応レスポンシブ (max-width: 768px)
+   =================================================== */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 8px;
+  }
+
+  header {
+    padding: 8px 0 12px;
+    margin-bottom: 10px;
+  }
+
+  .logo-title {
+    font-size: 1.5rem;
+  }
+
+  .subtitle {
+    font-size: 0.75rem;
+  }
+
+  .rules-toggle-btn {
+    top: 8px;
+    right: 8px;
+    font-size: 1rem;
+  }
+
+  /* テーブルエリアをスマホ画面に最適化 */
+  .table-area {
+    min-height: 420px;
+    padding: 15px 10px;
+    border-width: 3px;
+    border-radius: 12px;
+  }
+
+  /* 中央の得点壺を小さくする */
+  .table-center {
+    gap: 4px;
+  }
+
+  .pot-container {
+    width: 80px;
+    height: 80px;
+  }
+
+  .pot-label {
+    font-size: 0.6rem;
+  }
+
+  .pot-value {
+    font-size: 1.2rem;
+  }
+
+  .bet-round-info {
+    font-size: 0.65rem;
+    padding: 2px 8px;
+  }
+
+  #current-turn-text {
+    font-size: 0.8rem !important;
+  }
+
+  #deck-count-text {
+    font-size: 0.65rem !important;
+  }
+
+  #btn-deal-hand {
+    font-size: 0.8rem !important;
+    padding: 6px 14px !important;
+  }
+
+  #waiting-host-deal-text {
+    font-size: 0.7rem !important;
+  }
+
+  /* 座席の配置をスマホに最適化 */
+  .seat-top { top: 5px; }
+  .seat-left { left: 5px; top: 45%; }
+  .seat-right { right: 5px; top: 45%; }
+  .seat-bottom { bottom: 5px; width: 280px !important; gap: 10px !important; }
+
+  /* プレイヤーパネルをコンパクト化 */
+  .player-panel {
+    padding: 5px 8px;
+    min-width: 80px;
+  }
+
+  .player-name {
+    font-size: 0.7rem;
+    margin-bottom: 2px;
+  }
+
+  .player-chips {
+    font-size: 0.65rem;
+  }
+
+  .chip-token {
+    width: 16px;
+    height: 16px;
+  }
+
+  .player-status-badge {
+    font-size: 0.55rem;
+    padding: 1px 4px;
+    margin-top: 2px;
+  }
+
+  /* ミニカードを小型化 */
+  .player-mini-cards {
+    height: 32px;
+    gap: 3px;
+    margin-top: 3px;
+  }
+
+  .kabu-card {
+    width: 38px;
+    height: 57px;
+    border-width: 2px;
+  }
+
+  .kabu-card.my-card {
+    width: 58px;
+    height: 87px;
+    border-width: 2.5px;
+  }
+
+  .card-face {
+    padding: 4px;
+  }
+
+  .card-num-jp {
+    font-size: 1rem;
+  }
+
+  .my-card .card-num-jp {
+    font-size: 1.3rem;
+  }
+
+  .card-num-en {
+    font-size: 0.65rem;
+  }
+
+  .my-card .card-num-en {
+    font-size: 0.75rem;
+  }
+
+  /* 自分のカード置き場 */
+  .my-cards-container {
+    gap: 8px;
+  }
+
+  /* 親ボタンを小さく */
+  .dealer-button {
+    width: 18px;
+    height: 18px;
+    font-size: 0.55rem;
+    top: -6px;
+    right: -6px;
+  }
+
+  /* アクションコントロール */
+  .action-controls {
+    padding: 10px;
+    border-radius: 8px;
+    gap: 8px;
+  }
+
+  .action-buttons-group {
+    gap: 6px;
+  }
+
+  .action-buttons-group button {
+    font-size: 0.8rem;
+    padding: 8px 6px;
+  }
+
+  .slider-container {
+    min-width: unset;
+  }
+
+  .slider-label-val {
+    font-size: 0.75rem;
+  }
+
+  /* ログパネル */
+  .game-log-panel {
+    height: 80px;
+    padding: 8px;
+    font-size: 0.75rem;
+  }
+
+  /* モーダル */
+  .modal-content {
+    padding: 15px;
+    width: 95%;
+  }
+
+  .modal-title {
+    font-size: 1.3rem;
+    margin-bottom: 12px;
+  }
+
+  /* ルーレット */
+  .roulette-wrapper {
+    width: 140px;
+    height: 140px;
+    border-width: 5px;
+  }
+
+  .roulette-number-slice {
+    font-size: 1rem;
+    padding-top: 10px;
+  }
+
+  .roulette-pointer {
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 15px solid var(--color-vermilion);
+  }
+
+  /* ツキバナー */
+  #tsuki-banner {
+    padding: 15px 25px;
+    font-size: 1.3rem;
+    letter-spacing: 1px;
+  }
+
+  /* 十ゾロバナー */
+  #tozoro-banner {
+    padding: 20px 30px;
+    border-width: 3px;
+  }
+
+  .tozoro-title {
+    font-size: 2rem;
+    letter-spacing: 3px;
+  }
+
+  .tozoro-subtitle {
+    font-size: 1rem;
+  }
+
+  /* ルールモーダル */
+  .rules-modal-content {
+    max-height: 75vh;
+    padding: 15px;
+  }
+
+  .rules-table {
+    font-size: 0.75rem;
+  }
+
+  .rules-table th, .rules-table td {
+    padding: 4px 6px;
+  }
+
+  /* ロビー画面 */
+  .wafu-card {
+    padding: 15px;
+  }
+
+  .wafu-card h2 {
+    font-size: 1.1rem;
+  }
+
+  .btn-wafu {
+    font-size: 0.85rem;
+    padding: 10px 16px;
+  }
+
+  .input-wafu {
+    font-size: 0.85rem;
+    padding: 8px 12px;
+  }
+
+  /* ショーダウンバナー */
+  .showdown-banner {
+    font-size: 1rem;
+    padding: 10px;
+  }
+}
+
+/* ===================================================
+   さらに小さいスマートフォン (max-width: 480px)
+   =================================================== */
+@media (max-width: 480px) {
+  .table-area {
+    min-height: 380px;
+    padding: 10px 6px;
+  }
+
+  .seat-bottom {
+    width: 240px !important;
+    gap: 6px !important;
+  }
+
+  .pot-container {
+    width: 65px;
+    height: 65px;
+  }
+
+  .pot-label {
+    font-size: 0.5rem;
+  }
+
+  .pot-value {
+    font-size: 1rem;
+  }
+
+  .player-panel {
+    padding: 4px 6px;
+    min-width: 65px;
+  }
+
+  .player-name {
+    font-size: 0.6rem;
+  }
+
+  .player-chips {
+    font-size: 0.6rem;
+  }
+
+  .chip-token {
+    width: 14px;
+    height: 14px;
+  }
+
+  .kabu-card {
+    width: 32px;
+    height: 48px;
+  }
+
+  .kabu-card.my-card {
+    width: 50px;
+    height: 75px;
+  }
+
+  .card-num-jp {
+    font-size: 0.8rem;
+  }
+
+  .my-card .card-num-jp {
+    font-size: 1.1rem;
+  }
+
+  .card-num-en {
+    font-size: 0.55rem;
+  }
+
+  .my-card .card-num-en {
+    font-size: 0.65rem;
+  }
+
+  .player-mini-cards {
+    height: 26px;
+    gap: 2px;
+  }
+
+  .seat-left .player-panel,
+  .seat-right .player-panel {
+    min-width: 60px;
+    padding: 3px 5px;
+  }
+
+  #tsuki-banner {
+    padding: 10px 15px;
+    font-size: 1rem;
+  }
+
+  #tozoro-banner {
+    padding: 12px 18px;
+  }
+
+  .tozoro-title {
+    font-size: 1.5rem;
+    letter-spacing: 2px;
+  }
+
+  .tozoro-subtitle {
+    font-size: 0.85rem;
+  }
+
+  .game-log-panel {
+    height: 60px;
+    padding: 5px;
+    font-size: 0.7rem;
+  }
+}

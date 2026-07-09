@@ -130,10 +130,10 @@
           </div>
         </div>
 
-        <div id="seat-bottom" class="player-seat seat-bottom" style="display: flex; align-items: center; gap: 15px; bottom: 15px;">
+        <div id="seat-bottom" class="player-seat seat-bottom" style="display: flex; align-items: center; justify-content: space-between; gap: 15px; bottom: 12px; width: 340px;">
           <!-- 自分の情報パネルと役判定表示 -->
-          <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
-            <div class="player-panel active-turn" id="panel-player1" style="min-width: 120px;">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 5px; flex-shrink: 0; width: 140px;">
+            <div class="player-panel active-turn" id="panel-player1" style="min-width: 120px; width: 100%;">
               <span class="dealer-button" id="dealer-btn-player1" style="display: none;">親</span>
               <div class="player-name" id="name-player1">あなた</div>
               <div class="player-chips"><span class="chip-token"></span><span id="chips-player1">100</span></div>
@@ -143,8 +143,8 @@
               手札: --
             </div>
           </div>
-          <!-- 自分の手札カード (テーブル内に配置) -->
-          <div class="my-cards-container" id="my-hand-container" style="margin: 0;"></div>
+          <!-- 自分の手札カード (テーブル内に配置, 最小幅を確保) -->
+          <div class="my-cards-container" id="my-hand-container" style="margin: 0; min-width: 160px; min-height: 110px; justify-content: flex-start;"></div>
         </div>
       </div>
 
@@ -1222,13 +1222,14 @@
         
         if (!seatEl || !potEl) return;
         
-        const seatRect = seatEl.getBoundingClientRect();
+        const seatPanel = seatEl.querySelector(".player-panel");
+        const targetRect = seatPanel ? seatPanel.getBoundingClientRect() : seatEl.getBoundingClientRect();
         const potRect = potEl.getBoundingClientRect();
         
         const startX = potRect.left + potRect.width / 2 + window.scrollX;
         const startY = potRect.top + potRect.height / 2 + window.scrollY;
-        const endX = seatRect.left + seatRect.width / 2 + window.scrollX;
-        const endY = seatRect.top + seatRect.height / 2 + window.scrollY;
+        const endX = targetRect.left + targetRect.width / 2 + window.scrollX;
+        const endY = targetRect.top + targetRect.height / 2 + window.scrollY;
         
         // ポット回収時は5枚程度のチップを時間差でジャラジャラ飛ばす
         const chipCount = Math.min(6, amount);
@@ -1307,13 +1308,16 @@
         
         if (!fromSeatEl || !toSeatEl) return;
         
-        const fromRect = fromSeatEl.getBoundingClientRect();
-        const toRect = toSeatEl.getBoundingClientRect();
+        const fromPanel = fromSeatEl.querySelector(".player-panel");
+        const fromTargetRect = fromPanel ? fromPanel.getBoundingClientRect() : fromSeatEl.getBoundingClientRect();
         
-        const startX = fromRect.left + fromRect.width / 2 + window.scrollX;
-        const startY = fromRect.top + fromRect.height / 2 + window.scrollY;
-        const endX = toRect.left + toRect.width / 2 + window.scrollX;
-        const endY = toRect.top + toRect.height / 2 + window.scrollY;
+        const toPanel = toSeatEl.querySelector(".player-panel");
+        const toTargetRect = toPanel ? toPanel.getBoundingClientRect() : toSeatEl.getBoundingClientRect();
+        
+        const startX = fromTargetRect.left + fromTargetRect.width / 2 + window.scrollX;
+        const startY = fromTargetRect.top + fromTargetRect.height / 2 + window.scrollY;
+        const endX = toTargetRect.left + toTargetRect.width / 2 + window.scrollX;
+        const endY = toTargetRect.top + toTargetRect.height / 2 + window.scrollY;
         
         // 額に応じた枚数のコインを飛ばす（最大5枚に制限）
         const coinCount = Math.min(5, Math.ceil(amount / 2));
@@ -1579,7 +1583,36 @@
           return;
         }
 
-        if (result.killerTriggered) giftDetails += "【特殊】10.10キラー (1.2) が十ゾロ (10.10) を撃破しました！";
+        if (result.killerTriggered) {
+          giftDetails += "【特殊】10.10キラー (1.2) が十ゾロ (10.10) を撃破しました！";
+          
+          // 1.2の勝者と、10.10の敗者を見つける
+          const killerWinner = result.players.find(p => p.isWinner && (Math.min(...p.hand) === 1 && Math.max(...p.hand) === 2));
+          const tozoroLosers = result.players.filter(p => !p.isWinner && (p.hand[0] === 10 && p.hand[1] === 10));
+          
+          if (killerWinner && tozoroLosers.length > 0) {
+            let totalGift = 0;
+            const winIdx = state.players.findIndex(p => p.id === killerWinner.id);
+            
+            tozoroLosers.forEach(loser => {
+              const lp = state.players.find(p => p.id === loser.id);
+              const loserIdx = state.players.findIndex(p => p.id === loser.id);
+              if (lp && loserIdx !== -1) {
+                const gift = Math.min(lp.chips, 30);
+                lp.chips -= gift;
+                totalGift += gift;
+                
+                // 10.10の敗者から1.2の勝者へチップ移動演出
+                triggerGiftChipEffect(loserIdx, winIdx, gift);
+              }
+            });
+            
+            const wp = state.players.find(p => p.id === killerWinner.id);
+            if (wp) wp.chips += totalGift;
+            
+            giftDetails += `\n【お祝儀】10.10キラー勝利！十ゾロ (10.10) のプレイヤーから 30 チップを徴収しました。`;
+          }
+        }
 
         if (state.gameType === "online") broadcastShowdown(result.players, giftDetails, false);
         else {
@@ -2474,6 +2507,10 @@
             
             const isDefaultWin = payload.playerResults.length === 1;
             
+            // 10.10キラーお祝儀演出の同期 (ゲスト側)
+            const killerWinnerResult = payload.playerResults.find(pr => pr.isWinner && pr.evaluatedName.includes("10.10キラー"));
+            const tozoroLoserResults = payload.playerResults.filter(pr => !pr.isWinner && pr.evaluatedName.includes("10.10 (キラー撃破)"));
+            
             // 1. チップ演出および特大バナー演出の再生
             if (isDefaultWin && winnerIdxs.length === 1) {
               const winnerResult = winnerResults[0];
@@ -2545,6 +2582,17 @@
               winnerIdxs.forEach(winIdx => {
                 triggerPotCollectEffect(winIdx, potAmount / winnerIdxs.length);
               });
+              
+              // キラーお祝儀が発動している場合は、敗者から勝者へお祝儀チップ移動
+              if (killerWinnerResult && tozoroLoserResults.length > 0) {
+                const winIdx = state.players.findIndex(p => p.id === killerWinnerResult.id);
+                tozoroLoserResults.forEach(tlr => {
+                  const loseIdx = state.players.findIndex(p => p.id === tlr.id);
+                  if (winIdx !== -1 && loseIdx !== -1) {
+                    triggerGiftChipEffect(loseIdx, winIdx, 30);
+                  }
+                });
+              }
             }
             
             // 十ゾロ(10.10)お祝儀判定

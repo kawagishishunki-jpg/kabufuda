@@ -579,6 +579,33 @@ function handleShowdown() {
 
   if (result.killerTriggered) {
     giftDetails += "【特殊】10.10キラー (1.2) が十ゾロ (10.10) を撃破しました！";
+    
+    // 1.2の勝者と、10.10の敗者を見つける
+    const killerWinner = result.players.find(p => p.isWinner && (Math.min(...p.hand) === 1 && Math.max(...p.hand) === 2));
+    const tozoroLosers = result.players.filter(p => !p.isWinner && (p.hand[0] === 10 && p.hand[1] === 10));
+    
+    if (killerWinner && tozoroLosers.length > 0) {
+      let totalGift = 0;
+      const winIdx = state.players.findIndex(p => p.id === killerWinner.id);
+      
+      tozoroLosers.forEach(loser => {
+        const lp = state.players.find(p => p.id === loser.id);
+        const loserIdx = state.players.findIndex(p => p.id === loser.id);
+        if (lp && loserIdx !== -1) {
+          const gift = Math.min(lp.chips, 30);
+          lp.chips -= gift;
+          totalGift += gift;
+          
+          // 10.10の敗者から1.2の勝者へチップ移動演出
+          triggerGiftChipEffect(loserIdx, winIdx, gift);
+        }
+      });
+      
+      const wp = state.players.find(p => p.id === killerWinner.id);
+      if (wp) wp.chips += totalGift;
+      
+      giftDetails += `\n【お祝儀】10.10キラー勝利！十ゾロ (10.10) のプレイヤーから 30 チップを徴収しました。`;
+    }
   }
 
   if (state.gameType === "online") {
