@@ -1732,6 +1732,13 @@
         }, 2200);
       }
 
+      function runTsukiRound(tsukiPlayers) {
+        debugLog("ツキ配札実行中...");
+        addLog(null, "ツキ：山札をシャッフルして配札中...", "log-system");
+        
+        // 山札リセット＆シャッフル
+        state.deck = shuffle(generateDeck());
+        
         // 全員の手札をクリア（UIから古いカードを除去）
         tsukiPlayers.forEach(p => { p.hand = []; });
         state._tsukiDealing = true; // 配札演出中フラグをセット
