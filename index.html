@@ -2359,8 +2359,16 @@
         modals.btnCloseRoulette.style.display = "none";
         modals.rouletteWheel.style.transition = "none";
         modals.rouletteWheel.style.transform = "rotate(0deg)";
-        if (state.gameType === "online" && !state.isHost) {
-          modals.btnSpin.style.display = "none";
+        
+        // 自分が勝利者("me")の場合のみ、ルーレットを回すボタンを活性化して表示
+        const isMeWinner = (winnerId === "me");
+        if (state.gameType === "online") {
+          if (isMeWinner) {
+            modals.btnSpin.style.display = "block";
+            modals.btnSpin.classList.remove("btn-disabled");
+          } else {
+            modals.btnSpin.style.display = "none"; // 自分でない場合は押せない（結果待機）
+          }
         } else {
           modals.btnSpin.style.display = "block";
           modals.btnSpin.classList.remove("btn-disabled");
@@ -2369,7 +2377,10 @@
       }
 
       function spinRouletteWheel() {
-        if (state.gameType === "online" && !state.isHost) return;
+        if (state.gameType === "online") {
+          // オンラインでは勝者本人("me")しか回せない
+          if (state.rouletteWinnerId !== "me") return;
+        }
         modals.btnSpin.classList.add("btn-disabled");
         
         // 山札から引くのではなく、1〜10の出目を完全にランダム（均等確率）で決定
@@ -2385,7 +2396,12 @@
         modals.rouletteWheel.style.transform = `rotate(${targetAngle}deg)`;
 
         if (state.gameType === "online") {
-          peerManager.send(null, { type: "ROULETTE_SPIN", payload: { angle: targetAngle, result: rolledValue } });
+          if (state.isHost) {
+            peerManager.send(null, { type: "ROULETTE_SPIN", payload: { angle: targetAngle, result: rolledValue } });
+          } else {
+            // ゲストが回した場合はホストへ中継リクエストを送る
+            peerManager.send(null, { type: "GUEST_ROULETTE_SPIN", payload: { angle: targetAngle, result: rolledValue } });
+          }
         }
         setTimeout(() => { showRouletteResult(rolledValue); }, 4200);
       }
@@ -2596,6 +2612,14 @@
               processAction(player.id, payload.action, payload.amount);
             }
           }
+          if (type === "GUEST_ROULETTE_SPIN") {
+            // ゲスト勝者の回した結果を、全ゲストにブロードキャスト中継
+            peerManager.send(null, { type: "ROULETTE_SPIN", payload });
+            // ホスト自身も回転開始
+            modals.rouletteWheel.style.transition = "transform 4s cubic-bezier(0.15, 0.85, 0.35, 1)";
+            modals.rouletteWheel.style.transform = `rotate(${payload.angle}deg)`;
+            setTimeout(() => { showRouletteResult(payload.result); }, 4200);
+          }
         } else {
           if (type === "JOIN_REJECT") { alert(`接続拒否: ${payload.reason}`); exitToLobby(); }
           if (type === "PLAYER_LIST_UPDATE") { syncPlayers(payload.players); updateWaitingRoomUI(); }
@@ -2752,7 +2776,11 @@
               // 演出終了フラグを解除
               state._showingShowdownAnimation = false;
               
-              if (hasTozoroWinner && !isDefaultWin) {
+              if (payload.triggerRoulette) {
+                // 通常勝負でのピンゾロルーレットの起動をサポート
+                state.rouletteWinnerId = payload.rouletteWinnerId;
+                triggerRoulette(payload.rouletteWinnerId);
+              } else if (hasTozoroWinner && !isDefaultWin) {
                 // 通常ショーダウンの十ゾロ演出（不戦勝時は既に上で発火済みなのでスキップ）
                 const tozoroWinner = payload.playerResults.find(pr => pr.isWinner && pr.evaluatedName.includes("十ゾロ"));
                 triggerTozoroEffect(tozoroWinner.id, () => {
