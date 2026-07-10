@@ -2169,12 +2169,51 @@
         modals.showdownCelebration.innerHTML = giftText || "";
 
         if (state.gameType === "online" && !state.isHost) {
-          modals.btnNextHand.style.display = "none";
-          addLog(null, "ホストが次の局を開始するのをお待ちください...", "log-muted");
+          if (state._pendingGameState) {
+            modals.btnNextHand.textContent = "確認して次の局へ";
+            modals.btnNextHand.style.display = "block";
+            modals.btnNextHand.onclick = () => {
+              if (state._pendingGameState) {
+                applyPendingGameState(state._pendingGameState);
+                state._pendingGameState = null;
+              }
+              modals.btnNextHand.onclick = startNextHand;
+              modals.btnNextHand.textContent = "次の局へ";
+            };
+          } else {
+            modals.btnNextHand.style.display = "none";
+            addLog(null, "ホストが次の局を開始するのをお待ちください...", "log-muted");
+          }
         } else {
+          modals.btnNextHand.textContent = "次の局へ";
+          modals.btnNextHand.onclick = startNextHand;
           modals.btnNextHand.style.display = "block";
         }
         modals.showdown.style.display = "flex";
+      }
+
+      // 保留されたゲーム状態を適用する関数
+      function applyPendingGameState(payload) {
+        modals.showdown.style.display = "none";
+        modals.roulette.style.display = "none";
+        if (state.mode !== "game" && payload.mode === "game") {
+          addLog(null, "親が局を開始しました！", "log-system");
+        }
+        if (state.mode !== "game" && state.mode !== "pregame") { 
+          showScreen("game"); 
+        }
+        syncGameState(payload);
+        updateUI();
+        
+        if (state.mode === "game") {
+          const activePlayer = state.players[state.activePlayerIndex];
+          if (activePlayer && activePlayer.id === "me") {
+            addLog(null, "あなたの番です。行動を選択してください。", "log-highlight");
+            enableActionPanel(true);
+          } else {
+            enableActionPanel(false);
+          }
+        }
       }
 
       function startNextHand() {
@@ -2513,26 +2552,29 @@
           if (type === "JOIN_REJECT") { alert(`接続拒否: ${payload.reason}`); exitToLobby(); }
           if (type === "PLAYER_LIST_UPDATE") { syncPlayers(payload.players); updateWaitingRoomUI(); }
           if (type === "GAME_STATE_UPDATE") {
-            modals.showdown.style.display = "none";
-            modals.roulette.style.display = "none";
-            if (state.mode !== "game" && payload.mode === "game") {
-              addLog(null, "親が局を開始しました！", "log-system");
-            }
-            if (state.mode !== "game" && state.mode !== "pregame") { 
-              showScreen("game"); 
-            }
-            syncGameState(payload);
-            updateUI();
-            
-            if (state.mode === "game") {
-              const activePlayer = state.players[state.activePlayerIndex];
-              if (activePlayer.id === "me") {
-                addLog(null, "あなたの番です。行動を選択してください。", "log-highlight");
-                enableActionPanel(true);
-              } else {
-                enableActionPanel(false);
+            // ショーダウンダイアログが表示中、あるいは演出中の場合は、次の局への状態更新を一時保留する
+            const isShowdownVisible = (modals.showdown.style.display === "flex") || state._showingShowdownAnimation;
+            if (isShowdownVisible) {
+              state._pendingGameState = payload;
+              debugLog("ショーダウン表示中のため、GAME_STATE_UPDATEを保留します");
+              
+              // 既にショーダウンダイアログが開いている場合は、即座に「確認して次の局へ」ボタンを表示する
+              if (modals.showdown.style.display === "flex") {
+                modals.btnNextHand.textContent = "確認して次の局へ";
+                modals.btnNextHand.style.display = "block";
+                modals.btnNextHand.onclick = () => {
+                  if (state._pendingGameState) {
+                    applyPendingGameState(state._pendingGameState);
+                    state._pendingGameState = null;
+                  }
+                  modals.btnNextHand.onclick = startNextHand;
+                  modals.btnNextHand.textContent = "次の局へ";
+                };
               }
+              return;
             }
+            
+            applyPendingGameState(payload);
           }
           if (type === "ROULETTE_TRIGGER") {
             state.rouletteWinnerId = payload.rouletteWinnerId;
@@ -2544,6 +2586,8 @@
             setTimeout(() => { showRouletteResult(payload.result); }, 4200);
           }
           if (type === "SHOWDOWN_UPDATE") {
+            // ショーダウン演出開始フラグをセット
+            state._showingShowdownAnimation = true;
             const potAmount = state.pot;
             const winnerResults = payload.playerResults.filter(pr => pr.isWinner);
             
@@ -2569,6 +2613,18 @@
                     triggerGiftChipEffect(idx, winnerIdx, 3);
                   }
                 });
+              }
+              
+              // 10.10 十ゾロ不戦勝のお祝儀チップ移動演出（ゲスト側でも再生）
+              const isTozoroDefaultWin = winnerResult.evaluatedName.includes("十ゾロ");
+              if (isTozoroDefaultWin) {
+                state.players.forEach((p, idx) => {
+                  if (idx !== winnerIdx) {
+                    triggerGiftChipEffect(idx, winnerIdx, 20);
+                  }
+                });
+                // 十ゾロバナーエフェクトを即座に表示
+                triggerTozoroEffect(winnerResult.id, () => {});
               }
               
               // ポット獲得のチップ移動演出
@@ -2647,16 +2703,13 @@
             const delayTime = isDefaultWin ? 2500 : 1200;
             
             setTimeout(() => {
-              // すでに次の局に進んでいる場合はダイアログの表示をスキップ（レースコンディション対策）
-              if (state.mode === "pregame" || state.mode === "game") {
-                debugLog("ゲーム状態が既に次の局に進んでいるため、ショーダウン表示をスキップします");
-                return;
-              }
+              // 演出終了フラグを解除
+              state._showingShowdownAnimation = false;
               
-              if (hasTozoroWinner) {
+              if (hasTozoroWinner && !isDefaultWin) {
+                // 通常ショーダウンの十ゾロ演出（不戦勝時は既に上で発火済みなのでスキップ）
                 const tozoroWinner = payload.playerResults.find(pr => pr.isWinner && pr.evaluatedName.includes("十ゾロ"));
                 triggerTozoroEffect(tozoroWinner.id, () => {
-                  if (state.mode === "pregame" || state.mode === "game") return;
                   syncPlayers(payload.players);
                   state.pot = payload.pot;
                   updateUI();
