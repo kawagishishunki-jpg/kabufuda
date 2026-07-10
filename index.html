@@ -1743,6 +1743,20 @@
         
         const dealDelay = 600; // 1枚あたり600ms（ワクワク感を演出するためにゆっくり）
         
+        // 2枚目配札の遅延計算：1枚目が1or10のプレイヤーは2枚目を1.5秒追加で遅らせてドキドキ感を演出
+        let cumulativeDelay = 0;
+        const dealTimings = [];
+        dealSequence.forEach((item, seqIdx) => {
+          if (item.cardIdx === 1) {
+            // 2枚目：そのプレイヤーの1枚目が1or10なら追加遅延
+            const firstCardValue = drawnCards[item.player.id][0];
+            if (firstCardValue === 1 || firstCardValue === 10) {
+              cumulativeDelay += 1500; // 1.5秒追加ウェイト
+            }
+          }
+          dealTimings.push(seqIdx * dealDelay + cumulativeDelay);
+        });
+        
         dealSequence.forEach((item, seqIdx) => {
           setTimeout(() => {
             const p = item.player;
@@ -1795,11 +1809,11 @@
                 }
               }
             }
-          }, seqIdx * dealDelay);
+          }, dealTimings[seqIdx]);
         });
         
         // 全員への配札完了後の処理
-        const totalDealTime = dealSequence.length * dealDelay + 500;
+        const totalDealTime = (dealTimings[dealTimings.length - 1] || dealSequence.length * dealDelay) + 500;
         
         setTimeout(() => {
           // 手札を正式にセット
@@ -1826,8 +1840,17 @@
             // 役なし → カード回収演出の後に再配札
             addLog(null, "ツキ：役が出ませんでした。カードを回収して配り直します...", "log-system");
             
+            // めくり参加費：全員から1チップずつ得点壺に追加
+            tsukiPlayers.forEach(p => {
+              const fee = Math.min(p.chips, 1);
+              p.chips -= fee;
+              state.pot += fee;
+            });
+            addLog(null, `ツキ：めくり参加費として全員から1チップ徴収 → 得点壺: ${state.pot}`, "log-system");
+            updateUI();
+            
             if (state.gameType === "online" && state.isHost) {
-              peerManager.send(null, { type: "TSUKI_RETRY" });
+              peerManager.send(null, { type: "TSUKI_RETRY", payload: { pot: state.pot } });
             }
             
             // 全座席のカードを中央へ吸い込む回収演出
@@ -1872,8 +1895,17 @@
             if (winners.length >= 2) {
               addLog(null, "ツキ：最強役が同点です。カードを回収して配り直します...", "log-system");
               
+              // めくり参加費：全員から1チップずつ得点壺に追加
+              tsukiPlayers.forEach(p => {
+                const fee = Math.min(p.chips, 1);
+                p.chips -= fee;
+                state.pot += fee;
+              });
+              addLog(null, `ツキ：めくり参加費として全員から1チップ徴収 → 得点壺: ${state.pot}`, "log-system");
+              updateUI();
+              
               if (state.gameType === "online" && state.isHost) {
-                peerManager.send(null, { type: "TSUKI_TIE" });
+                peerManager.send(null, { type: "TSUKI_TIE", payload: { pot: state.pot } });
               }
               
               tsukiPlayers.forEach((p, pIdx) => {
@@ -1980,6 +2012,19 @@
         
         const dealDelay = 600;
         
+        // 2枚目配札の遅延計算：1枚目が1or10のプレイヤーは2枚目を1.5秒追加で遅らせてドキドキ感を演出
+        let cumulativeDelay = 0;
+        const dealTimings = [];
+        dealSequence.forEach((item, seqIdx) => {
+          if (item.cardIdx === 1) {
+            const firstCardValue = drawnCards[item.player.id][0];
+            if (firstCardValue === 1 || firstCardValue === 10) {
+              cumulativeDelay += 1500;
+            }
+          }
+          dealTimings.push(seqIdx * dealDelay + cumulativeDelay);
+        });
+        
         dealSequence.forEach((item, seqIdx) => {
           setTimeout(() => {
             const p = item.player;
@@ -2027,10 +2072,10 @@
                 }
               }
             }
-          }, seqIdx * dealDelay);
+          }, dealTimings[seqIdx]);
         });
         
-        const totalDealTime = dealSequence.length * dealDelay + 500;
+        const totalDealTime = (dealTimings[dealTimings.length - 1] || dealSequence.length * dealDelay) + 500;
         setTimeout(() => {
           // 手札を正式にセット
           state.players.forEach(p => {
@@ -2665,6 +2710,13 @@
           }
           if (type === "TSUKI_RETRY") {
             addLog(null, "ツキ：役が出ませんでした。カードを回収して配り直します...", "log-system");
+            // めくり参加費の同期：ホストから送られたポット値を反映
+            if (payload && payload.pot !== undefined) {
+              // 各プレイヤーから1チップ差し引き
+              state.players.forEach(p => { p.chips -= 1; });
+              state.pot = payload.pot;
+              addLog(null, `ツキ：めくり参加費として全員から1チップ徴収 → 得点壺: ${state.pot}`, "log-system");
+            }
             state.players.forEach((p, idx) => {
               triggerFoldCardEffect(idx);
             });
@@ -2677,6 +2729,12 @@
           }
           if (type === "TSUKI_TIE") {
             addLog(null, "ツキ：最強役が同点です。カードを回収して配り直します...", "log-system");
+            // めくり参加費の同期
+            if (payload && payload.pot !== undefined) {
+              state.players.forEach(p => { p.chips -= 1; });
+              state.pot = payload.pot;
+              addLog(null, `ツキ：めくり参加費として全員から1チップ徴収 → 得点壺: ${state.pot}`, "log-system");
+            }
             state.players.forEach((p, idx) => {
               triggerFoldCardEffect(idx);
             });
@@ -2950,7 +3008,7 @@
           
           if (p.id !== "me") {
             const existingMini = cardsEl.querySelectorAll(".kabu-card");
-            if (existingMini.length !== 2 && p.hand && p.hand.length === 2 && !p.isFolded && state.mode === "game") {
+            if (existingMini.length !== 2 && p.hand && p.hand.length === 2 && !p.isFolded && (state.mode === "game" || state.isTsuki)) {
               cardsEl.innerHTML = "";
               let mc1, mc2;
               if (state.isTsuki) {
@@ -2982,7 +3040,7 @@
         });
 
         const myPlayer = state.players[myIndex];
-        if (state.mode === "game" && myPlayer && myPlayer.hand && myPlayer.hand.length === 2) {
+        if ((state.mode === "game" || state.isTsuki) && myPlayer && myPlayer.hand && myPlayer.hand.length === 2) {
           const existingCards = gameElems.myHandContainer.querySelectorAll(".kabu-card");
           if (existingCards.length !== 2) {
             gameElems.myHandContainer.innerHTML = "";
