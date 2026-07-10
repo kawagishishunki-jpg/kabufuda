@@ -207,6 +207,18 @@
     </div>
   </div>
 
+  <!-- 戦歴（スコア結果）モーダル -->
+  <div id="score-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+      <h2 class="modal-title">対戦終了 (戦歴結果)</h2>
+      <p style="font-size: 0.85rem; color: var(--color-muted); margin-bottom: 15px;">
+        ゲームを終了しました。最終の持ちチップ数は以下の通りです。
+      </p>
+      <div id="score-players-container" style="display: flex; flex-direction: column; gap: 12px; margin: 20px 0; border: 1px solid var(--color-gold-dark); border-radius: 8px; padding: 15px; background: rgba(0,0,0,0.3);"></div>
+      <button id="btn-close-score" class="btn-wafu btn-wafu-gold" style="width: 100%;">結果を閉じてロビーへ</button>
+    </div>
+  </div>
+
   <!-- ルール説明モーダル -->
   <div id="rules-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content rules-modal-content">
@@ -345,7 +357,9 @@
       };
 
       function evaluateHand(hand) {
-        if (!hand || hand.length !== 2) throw new Error("手札は2枚である必要があります");
+        if (!hand || hand.length !== 2) {
+          return { type: 0, name: "配札中...", cards: hand || [] };
+        }
         const cards = [...hand].sort((a, b) => a - b);
         const [c1, c2] = cards;
         if (c1 === c2) {
@@ -689,7 +703,10 @@
         showdownPlayers: document.getElementById("showdown-players-container"),
         showdownBanner: document.getElementById("showdown-winner-banner"),
         showdownCelebration: document.getElementById("showdown-celebration-info"),
-        btnNextHand: document.getElementById("btn-next-hand")
+        btnNextHand: document.getElementById("btn-next-hand"),
+        score: document.getElementById("score-modal"),
+        scorePlayers: document.getElementById("score-players-container"),
+        btnCloseScore: document.getElementById("btn-close-score")
       };
 
       let peerManager = null;
@@ -1676,12 +1693,21 @@
 
       function startTsuki(tsukiPlayers) {
         state.isTsuki = true;
+        state._tsukiDealing = true; // 先行して配札ロックを適用
+        
+        // 勝負ダイアログとルーレットを非表示にする
+        modals.showdown.style.display = "none";
+        modals.roulette.style.display = "none";
+        
         addLog(null, "★★★ 同点につき「ツキ (延長戦)」が発生！ ★★★", "log-highlight");
         
-        // 全プレイヤーのフォールド状態を強制解除し、ツキに全員復帰させる！
+        // 全プレイヤーのフォールド状態を強制解除し、手札データおよびDOM表示を即座に完全クリア！
         state.players.forEach(p => {
           p.isFolded = false;
+          p.hand = [];
         });
+        gameElems.myHandContainer.innerHTML = "";
+        clearAllPlayerMiniCards();
         
         if (state.gameType === "online" && state.isHost) {
           broadcastGameState();
@@ -1706,15 +1732,14 @@
         }, 2200);
       }
 
-      function runTsukiRound(tsukiPlayers) {
-        debugLog("ツキ配札実行中...");
-        addLog(null, "ツキ：山札をシャッフルして配札中...", "log-system");
-        
-        // 山札リセット＆シャッフル
-        state.deck = shuffle(generateDeck());
-        
         // 全員の手札をクリア（UIから古いカードを除去）
         tsukiPlayers.forEach(p => { p.hand = []; });
+        state._tsukiDealing = true; // 配札演出中フラグをセット
+        
+        // DOMの手札表示を明示的にクリア（1枚ずつの配札演出が確実に動くようにする）
+        gameElems.myHandContainer.innerHTML = "";
+        clearAllPlayerMiniCards();
+        
         updateUI();
         
         // 1枚ずつ順番にアニメーション付きで配る
@@ -1724,10 +1749,10 @@
         // 2周目: 各プレイヤーに2枚目
         tsukiPlayers.forEach((p, i) => dealSequence.push({ player: p, cardIdx: 1, seqIdx: tsukiPlayers.length + i }));
         
-        // 全員分のカードを先に引いておく
+        // 全員分のカードを先に引いておく（キーはp.nameに統一）
         const drawnCards = {};
         tsukiPlayers.forEach(p => {
-          drawnCards[p.id] = [state.deck.pop(), state.deck.pop()];
+          drawnCards[p.name] = [state.deck.pop(), state.deck.pop()];
         });
 
         if (state.gameType === "online" && state.isHost) {
@@ -1749,7 +1774,8 @@
         dealSequence.forEach((item, seqIdx) => {
           if (item.cardIdx === 1) {
             // 2枚目：そのプレイヤーの1枚目が1or10なら追加遅延
-            const firstCardValue = drawnCards[item.player.id][0];
+            const playerDrawn = drawnCards[item.player.name];
+            const firstCardValue = playerDrawn ? playerDrawn[0] : 0;
             if (firstCardValue === 1 || firstCardValue === 10) {
               cumulativeDelay += 1500; // 1.5秒追加ウェイト
             }
@@ -1761,7 +1787,10 @@
           setTimeout(() => {
             const p = item.player;
             if (!p.hand) p.hand = [];
-            p.hand.push(drawnCards[p.id][item.cardIdx]);
+            
+            const playerDrawn = drawnCards[p.name];
+            const cardValue = playerDrawn ? playerDrawn[item.cardIdx] : 1;
+            p.hand.push(cardValue);
             
             // ツキではすべてのプレイヤーのカードを表向きで配る
             const myIndex = state.players.findIndex(pl => pl.id === "me");
@@ -1774,7 +1803,8 @@
             if (seatEl) {
               const playerNum = { "seat-bottom": 1, "seat-top": 2, "seat-left": 3, "seat-right": 4 }[seatId];
               const cardsEl = document.getElementById(`cards-player${playerNum}`);
-              const cardValue = drawnCards[p.id][item.cardIdx];
+              const playerDrawn = drawnCards[p.name];
+              const cardValue = playerDrawn ? playerDrawn[item.cardIdx] : 1;
               
               if (cardsEl) {
                 if (p.id === "me") {
@@ -1816,9 +1846,10 @@
         const totalDealTime = (dealTimings[dealTimings.length - 1] || dealSequence.length * dealDelay) + 500;
         
         setTimeout(() => {
+          state._tsukiDealing = false; // 配札演出完了
           // 手札を正式にセット
           tsukiPlayers.forEach(p => {
-            p.hand = drawnCards[p.id];
+            p.hand = drawnCards[p.name] || [];
           });
           
           // 役（シッピン以上）の判定
@@ -2004,6 +2035,12 @@
           p.hand = [];
           p.isFolded = false;
         });
+        state._tsukiDealing = true; // 配札演出中フラグをセット
+        
+        // DOMの手札表示を明示的にクリア
+        gameElems.myHandContainer.innerHTML = "";
+        clearAllPlayerMiniCards();
+        
         updateUI();
         
         const dealSequence = [];
@@ -2017,7 +2054,8 @@
         const dealTimings = [];
         dealSequence.forEach((item, seqIdx) => {
           if (item.cardIdx === 1) {
-            const firstCardValue = drawnCards[item.player.id][0];
+            const playerDrawn = drawnCards[item.player.name];
+            const firstCardValue = playerDrawn ? playerDrawn[0] : 0;
             if (firstCardValue === 1 || firstCardValue === 10) {
               cumulativeDelay += 1500;
             }
@@ -2030,7 +2068,8 @@
             const p = item.player;
             if (!p.hand) p.hand = [];
             
-            const cardValue = drawnCards[p.id][item.cardIdx];
+            const playerDrawn = drawnCards[p.name];
+            const cardValue = playerDrawn ? playerDrawn[item.cardIdx] : 1;
             p.hand.push(cardValue);
             
             const myIndex = state.players.findIndex(pl => pl.id === "me");
@@ -2077,9 +2116,10 @@
         
         const totalDealTime = (dealTimings[dealTimings.length - 1] || dealSequence.length * dealDelay) + 500;
         setTimeout(() => {
+          state._tsukiDealing = false; // 配札演出完了
           // 手札を正式にセット
           state.players.forEach(p => {
-            p.hand = drawnCards[p.id];
+            p.hand = drawnCards[p.name] || [];
           });
           
           // 役の判定ログ表示（ゲスト側でも出す）
@@ -2169,21 +2209,22 @@
         modals.showdownCelebration.innerHTML = giftText || "";
 
         if (state.gameType === "online" && !state.isHost) {
-          if (state._pendingGameState) {
-            modals.btnNextHand.textContent = "確認して次の局へ";
-            modals.btnNextHand.style.display = "block";
-            modals.btnNextHand.onclick = () => {
-              if (state._pendingGameState) {
-                applyPendingGameState(state._pendingGameState);
-                state._pendingGameState = null;
-              }
-              modals.btnNextHand.onclick = startNextHand;
-              modals.btnNextHand.textContent = "次の局へ";
-            };
-          } else {
-            modals.btnNextHand.style.display = "none";
-            addLog(null, "ホストが次の局を開始するのをお待ちください...", "log-muted");
+          modals.btnNextHand.style.display = "none";
+          addLog(null, "ホストが次の局を開始するのをお待ちください...", "log-muted");
+          
+          // 自動移行用の時間記録とタイマー
+          state._showdownShownTime = Date.now();
+          if (state._autoNextHandTimer) {
+            clearTimeout(state._autoNextHandTimer);
           }
+          state._autoNextHandTimer = setTimeout(() => {
+            state._autoNextHandTimer = null;
+            if (state._pendingGameState) {
+              debugLog("勝負表示から3.5秒経過したため、保留中の次の局へ自動移行します");
+              applyPendingGameState(state._pendingGameState);
+              state._pendingGameState = null;
+            }
+          }, 3500); // 3.5秒間ショーダウン結果を表示
         } else {
           modals.btnNextHand.textContent = "次の局へ";
           modals.btnNextHand.onclick = startNextHand;
@@ -2552,31 +2593,28 @@
           if (type === "JOIN_REJECT") { alert(`接続拒否: ${payload.reason}`); exitToLobby(); }
           if (type === "PLAYER_LIST_UPDATE") { syncPlayers(payload.players); updateWaitingRoomUI(); }
           if (type === "GAME_STATE_UPDATE") {
-            // ショーダウンダイアログが表示中、あるいは演出中の場合は、次の局への状態更新を一時保留する
-            const isShowdownVisible = (modals.showdown.style.display === "flex") || state._showingShowdownAnimation;
-            if (isShowdownVisible) {
-              state._pendingGameState = payload;
-              debugLog("ショーダウン表示中のため、GAME_STATE_UPDATEを保留します");
-              
-              // 既にショーダウンダイアログが開いている場合は、即座に「確認して次の局へ」ボタンを表示する
-              if (modals.showdown.style.display === "flex") {
-                modals.btnNextHand.textContent = "確認して次の局へ";
-                modals.btnNextHand.style.display = "block";
-                modals.btnNextHand.onclick = () => {
-                  if (state._pendingGameState) {
-                    applyPendingGameState(state._pendingGameState);
-                    state._pendingGameState = null;
-                  }
-                  modals.btnNextHand.onclick = startNextHand;
-                  modals.btnNextHand.textContent = "次の局へ";
-                };
-              }
+            // ツキ実行中はゲームモード書き換えを行わない
+            if (state.isTsuki) {
+              debugLog("ツキ延長戦中のため、通常のGAME_STATE_UPDATEを無視します");
               return;
             }
             
+            const isShowdownVisible = (modals.showdown.style.display === "flex") || state._showingShowdownAnimation;
+            const isRouletteVisible = (modals.roulette.style.display === "flex") || state._showingRouletteAnimation;
+            if (isShowdownVisible || isRouletteVisible) {
+              const elapsed = state._showdownShownTime ? (Date.now() - state._showdownShownTime) : 0;
+              if (elapsed < 3500 || isRouletteVisible) {
+                state._pendingGameState = payload;
+                debugLog(`勝負/ルーレット表示中のため、GAME_STATE_UPDATEを保留します`);
+                return;
+              }
+            }
+            
+            state._pendingGameState = null;
             applyPendingGameState(payload);
           }
           if (type === "ROULETTE_TRIGGER") {
+            state._showingRouletteAnimation = true;
             state.rouletteWinnerId = payload.rouletteWinnerId;
             triggerRoulette(payload.rouletteWinnerId);
           }
@@ -2586,8 +2624,9 @@
             setTimeout(() => { showRouletteResult(payload.result); }, 4200);
           }
           if (type === "SHOWDOWN_UPDATE") {
-            // ショーダウン演出開始フラグをセット
+            // ショーダウン演出開始フラグをセット、ルーレット演出フラグはクリア
             state._showingShowdownAnimation = true;
+            state._showingRouletteAnimation = false;
             const potAmount = state.pot;
             const winnerResults = payload.playerResults.filter(pr => pr.isWinner);
             
@@ -2725,27 +2764,24 @@
           }
           if (type === "TSUKI_ROUND_START") {
             state.isTsuki = true;
+            state._tsukiDealing = true; // 即座に配札中ロックを適用
             state.deckCount = payload.deckCount;
             
-            // 全プレイヤーのフォールド状態を解除し、めくりゲームに全員復帰させる
+            // 勝負ダイアログとルーレットを非表示にする
+            modals.showdown.style.display = "none";
+            modals.roulette.style.display = "none";
+            
+            // 全プレイヤーのフォールド状態を解除し、手札データおよびDOM表示を即座に完全クリア！
             state.players.forEach(p => {
               p.isFolded = false;
+              p.hand = [];
             });
-            
-            // ホスト視点のIDキーを、ゲスト視点のIDキーにマッピングする（バグ修正）
-            const mappedDrawnCards = {};
-            const myPlayerObj = state.players.find(pl => pl.id === "me");
-            const myPeerId = myPlayerObj ? myPlayerObj.peerId : "";
-            
-            Object.keys(payload.drawnCards).forEach(hostPlayerId => {
-              let guestPlayerId = hostPlayerId;
-              if (hostPlayerId === "me") {
-                guestPlayerId = "host";
-              } else if (hostPlayerId === `player-${myPeerId}`) {
-                guestPlayerId = "me";
-              }
-              mappedDrawnCards[guestPlayerId] = payload.drawnCards[hostPlayerId];
-            });
+            gameElems.myHandContainer.innerHTML = "";
+            clearAllPlayerMiniCards();
+            updateUI();
+
+            // 名前に紐付けられた drawnCards をそのまま使用（キー変換不要）
+            const drawnCards = payload.drawnCards;
             
             let banner = document.getElementById("tsuki-banner");
             if (!banner) {
@@ -2756,10 +2792,15 @@
               setTimeout(() => { banner.classList.add("show"); }, 50);
               setTimeout(() => {
                 banner.classList.remove("show");
-                setTimeout(() => banner.remove(), 500);
+                setTimeout(() => {
+                  banner.remove();
+                  // バナー消滅後にアニメーションを開始
+                  runClientTsukiRound(drawnCards);
+                }, 500);
               }, 2200);
+            } else {
+              runClientTsukiRound(drawnCards);
             }
-            runClientTsukiRound(mappedDrawnCards);
           }
           if (type === "TSUKI_RETRY") {
             addLog(null, "ツキ：役が出ませんでした。カードを回収して配り直します...", "log-system");
@@ -3093,7 +3134,7 @@
         });
 
         const myPlayer = state.players[myIndex];
-        if ((state.mode === "game" || state.isTsuki) && myPlayer && myPlayer.hand && myPlayer.hand.length === 2) {
+        if ((state.mode === "game" || state.isTsuki) && myPlayer && myPlayer.hand && myPlayer.hand.length === 2 && !state._tsukiDealing) {
           const existingCards = gameElems.myHandContainer.querySelectorAll(".kabu-card");
           if (existingCards.length !== 2) {
             gameElems.myHandContainer.innerHTML = "";
@@ -3256,10 +3297,52 @@
       }
 
       function exitToLobby() {
+        // ゲーム画面（pregame, game, showdown等）から退出する場合のみ戦歴を表示
+        const isCurrentlyPlaying = (state.mode === "game" || state.mode === "pregame" || modals.showdown.style.display === "flex");
+        if (isCurrentlyPlaying && state.players && state.players.length >= 1) {
+          // すでに戦歴モーダルが開いていればロビーへ直接抜ける
+          if (modals.score.style.display === "flex") {
+            performActualExit();
+            return;
+          }
+          
+          // 戦歴データを生成してモーダルに表示
+          modals.scorePlayers.innerHTML = "";
+          state.players.forEach(p => {
+            const isMe = p.id === "me";
+            const fontStyle = isMe ? "color: var(--color-gold-light); font-weight: bold;" : "";
+            modals.scorePlayers.innerHTML += `
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
+                <span style="${fontStyle}">${p.name} ${isMe ? " (あなた)" : ""}</span>
+                <span style="font-weight: 700; color: var(--color-gold);">${p.chips} チップ</span>
+              </div>`;
+          });
+          
+          modals.score.style.display = "flex";
+          
+          modals.btnCloseScore.onclick = () => {
+            modals.score.style.display = "none";
+            performActualExit();
+          };
+          return;
+        }
+        
+        // それ以外（ロビー画面や待機室からの単純切断など）は即座にロビーへ戻る
+        performActualExit();
+      }
+
+      function performActualExit() {
         if (peerManager) peerManager.cleanup();
         modals.rules.style.display = "none";
         modals.roulette.style.display = "none";
         modals.showdown.style.display = "none";
+        modals.score.style.display = "none";
+        
+        if (state._autoNextHandTimer) {
+          clearTimeout(state._autoNextHandTimer);
+          state._autoNextHandTimer = null;
+        }
+        
         state.mode = "lobby";
         state.players = [];
         showScreen("lobby");
